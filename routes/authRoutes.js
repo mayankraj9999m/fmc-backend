@@ -1,21 +1,19 @@
 import express from "express";
-import { OAuth2Client } from "google-auth-library";
+import axios from "axios"; // Changed: Use Axios to fetch user info
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import pool from "../db/db.js";
-import { verifyToken, verifyAdmin, verifyMasterKey } from "../middleware/authMiddleware.js"; // Import Middleware
+import { verifyToken, verifyAdmin, verifyMasterKey } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// --- HELPER: Generate JWT ---
 const generateTokenAndSetCookie = (res, user, role) => {
     const token = jwt.sign(
         { 
             id: user.google_id || user.id, 
             email: user.email, 
             role: role,
-            hostel_name: user.hostel_name // useful for admin permissions
+            hostel_name: user.hostel_name
         },
         process.env.JWT_SECRET,
         { expiresIn: "7d" }
@@ -30,17 +28,20 @@ const generateTokenAndSetCookie = (res, user, role) => {
 };
 
 // ==========================================
-// 1. STUDENT AUTHENTICATION (Google)
+// 1. STUDENT AUTHENTICATION (Google) DONE
 // ==========================================
 router.post("/auth/google", async (req, res) => {
     const { token } = req.body;
+
     try {
-        const ticket = await client.verifyIdToken({
-            idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID,
+        // [MODIFIED] Fetch user info from Google using the Access Token
+        const googleResponse = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
         });
-        
-        const { sub: google_id, email, name, picture } = ticket.getPayload();
+
+        const { sub: google_id, email, name, picture } = googleResponse.data;
 
         if (!email.endsWith("@nitdelhi.ac.in")) {
             return res.status(403).json({ error: "Access restricted to @nitdelhi.ac.in emails only." });
@@ -58,16 +59,18 @@ router.post("/auth/google", async (req, res) => {
             user = newUser.rows[0];
             needsOnboarding = true;
         } else {
+            // Existing student
             user = userCheck.rows[0];
             needsOnboarding = !user.hostel_name;
         }
 
+        // 3. Generate Session
         generateTokenAndSetCookie(res, user, "student");
 
         res.status(200).json({ user, needsOnboarding, role: "student", message: "Login successful" });
     } catch (error) {
-        console.error("Auth Error:", error);
-        res.status(500).json({ error: "Authentication failed" });
+        console.error("Auth Error:", error.message);
+        res.status(500).json({ error: "Authentication failed. Invalid Google Token." });
     }
 });
 
@@ -152,7 +155,7 @@ router.post("/admin/create", verifyMasterKey, async (req, res) => {
 /**
  * [PROTECTED] Add Worker
  * Requirement: Must be logged in as ADMIN.
- * Constraint: Admin can only add workers to THEIR OWN hostel (optional strictness).
+ * Constraint: Admin can only add workers to THEIR OWN hostel.
  */
 router.post("/admin/add-worker", verifyToken, verifyAdmin, async (req, res) => {
     // req.user is populated by verifyToken middleware
@@ -162,7 +165,6 @@ router.post("/admin/add-worker", verifyToken, verifyAdmin, async (req, res) => {
 
     try {
         // STRICT CHECK: Ensure Admin isn't creating workers for other hostels
-        // (Remove this block if you want Admins to add workers anywhere)
         if (requestingAdminHostel && requestingAdminHostel !== hostel_name) {
              return res.status(403).json({ 
                  error: `Unauthorized. You can only add workers to ${requestingAdminHostel}` 
@@ -186,6 +188,55 @@ router.post("/admin/add-worker", verifyToken, verifyAdmin, async (req, res) => {
     } catch (error) {
         console.error("Add Worker Error:", error);
         res.status(500).json({ error: "Failed to add worker" });
+    }
+});
+
+// ==========================================
+// 4. PROFILE ROUTE (Secure & Role-Aware)
+// ==========================================
+router.get("/profile", verifyToken, async (req, res) => {
+    try {
+        const { id, role } = req.user; // Decoded from JWT
+        let userQuery;
+        let queryParams = [id];
+
+        // Explicitly select columns to EXCLUDE password_hash
+        if (role === "student") {
+            // Students (Google Auth) - No password to hide, but good practice
+            userQuery = `
+                SELECT google_id, name, email, profile_picture, hostel_name, 
+                       room_no, floor_no, phone_number, is_onboarded, created_at 
+                FROM students WHERE google_id = $1`;
+
+        } else if (role === "admin") {
+            // Admins - Exclude password_hash
+            userQuery = `
+                SELECT id, name, email, phone, hostel_name, position, 
+                       photo, created_at 
+                FROM admins WHERE id = $1`;
+
+        } else if (role === "worker") {
+            // Workers - Exclude password_hash
+            userQuery = `
+                SELECT id, name, email, phone_no, hostel_name, department, 
+                       sub_work_category, photo, current_rating, rating_count, created_at 
+                FROM workers WHERE id = $1`;
+        } else {
+            return res.status(400).json({ error: "Invalid role" });
+        }
+
+        const result = await pool.query(userQuery, queryParams);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const user = result.rows[0];
+        res.json({ user, role });
+
+    } catch (error) {
+        console.error("Profile Fetch Error:", error);
+        res.status(500).json({ error: "Failed to fetch profile" });
     }
 });
 
