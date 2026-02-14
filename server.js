@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 5000;
 
 // 1. CORS Configuration (CRITICAL for Cookies)
 app.use(cors({
-    origin: "http://localhost:5173", // Your React Frontend URL
+    origin: process.env.FRONTEND_URL, // Your React Frontend URL
     credentials: true, // Allow cookies to be sent/received
 }));
 
