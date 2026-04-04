@@ -1,0 +1,57 @@
+CREATE SCHEMA "public";
+CREATE TABLE "admins" (
+	"id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+	"name" varchar(255) NOT NULL,
+	"email" varchar(255) NOT NULL CONSTRAINT "admins_email_key" UNIQUE,
+	"password_hash" varchar(255) NOT NULL,
+	"phone_no" varchar(20),
+	"photo" text,
+	"position" varchar(100) NOT NULL,
+	"hostel_name" varchar(100),
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+	"last_login" timestamp with time zone
+);
+CREATE TABLE "students" (
+	"id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+	"google_id" varchar(255) CONSTRAINT "students_google_id_key" UNIQUE,
+	"roll_no" varchar(50) CONSTRAINT "students_roll_no_key" UNIQUE,
+	"name" varchar(255) NOT NULL,
+	"email" varchar(255) NOT NULL CONSTRAINT "students_email_key" UNIQUE,
+	"profile_picture" text,
+	"hostel_name" varchar(100),
+	"room_no" varchar(20),
+	"floor_no" integer,
+	"gender" varchar(20),
+	"phone_no" varchar(20),
+	"branch" varchar(100),
+	"year_of_joining" integer,
+	"is_onboarded" boolean DEFAULT false,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+	"last_login" timestamp with time zone,
+	"programme" varchar(50)
+);
+CREATE TABLE "workers" (
+	"id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+	"name" varchar(255) NOT NULL,
+	"email" varchar(255) NOT NULL CONSTRAINT "workers_email_key" UNIQUE,
+	"password_hash" varchar(255) NOT NULL,
+	"phone_no" varchar(20),
+	"gender" varchar(20),
+	"photo" text,
+	"hostel_name" varchar(100),
+	"department" varchar(100) NOT NULL,
+	"sub_work_category" varchar(100),
+	"current_rating" numeric(3, 2) DEFAULT '0.00',
+	"rating_count" integer DEFAULT 0,
+	"created_at" timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+	"last_login" timestamp with time zone
+);
+CREATE UNIQUE INDEX "admins_email_key" ON "admins" ("email");
+CREATE UNIQUE INDEX "admins_pkey" ON "admins" ("id");
+CREATE INDEX "idx_students_google_id" ON "students" ("google_id");
+CREATE UNIQUE INDEX "students_email_key" ON "students" ("email");
+CREATE UNIQUE INDEX "students_google_id_key" ON "students" ("google_id");
+CREATE UNIQUE INDEX "students_pkey" ON "students" ("id");
+CREATE UNIQUE INDEX "students_roll_no_key" ON "students" ("roll_no");
+CREATE UNIQUE INDEX "workers_email_key" ON "workers" ("email");
+CREATE UNIQUE INDEX "workers_pkey" ON "workers" ("id");

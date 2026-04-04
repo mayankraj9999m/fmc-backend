@@ -1,36 +1,23 @@
 import jwt from "jsonwebtoken";
 
-// 1. Verify Authentication (Any Valid User)
 export const verifyToken = (req, res, next) => {
+    // Read the token from the cookie
     const token = req.cookies.token;
 
     if (!token) {
-        return res.status(401).json({ error: "Access denied. Not authenticated." });
+        return next();
     }
 
     try {
+        // Verify the token using your secret key
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded; // { id, email, role, hostel_name? }
-        next();
+        
+        // Attach the decoded payload (id, email, role) to the request object
+        req.user = decoded; 
+        next(); // Move to the actual route handler
     } catch (error) {
-        return res.status(403).json({ error: "Invalid or expired token." });
+        // Token is invalid or expired
+        res.clearCookie("token"); // Clear the bad cookie
+        next();
     }
-};
-
-// 2. Verify Admin Role (Must be authenticated first)
-export const verifyAdmin = (req, res, next) => {
-    if (req.user.role !== "admin") {
-        return res.status(403).json({ error: "Access denied. Admins only." });
-    }
-    next();
-};
-
-// 3. Verify Master Key (For creating new Admins)
-export const verifyMasterKey = (req, res, next) => {
-    const { masterKey } = req.body;
-    
-    if (!masterKey || masterKey !== process.env.MASTER_ADMIN_KEY) {
-        return res.status(403).json({ error: "Invalid Master Admin Key." });
-    }
-    next();
 };

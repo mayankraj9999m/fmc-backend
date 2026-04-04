@@ -1,31 +1,23 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
-import cookieParser from "cookie-parser"; // Import this
-import authRouter from "./routes/authRoutes.js";
-
-dotenv.config();
+import cookieParser from "cookie-parser"; // MUST BE INSTALLED: npm install cookie-parser
+import authRoutes from "./routes/authRoutes.js";
+import adminRoutes from "./routes/juniorAssistantRoutes.js";
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-// 1. CORS Configuration (CRITICAL for Cookies)
+// 1. CORS Configuration
 app.use(cors({
-    origin: process.env.FRONTEND_URL, // Your React Frontend URL
-    credentials: true, // Allow cookies to be sent/received
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true, // ABSOLUTELY REQUIRED for cookies to be sent/received
 }));
 
-// 2. Middleware
+// 2. Middlewares
 app.use(express.json());
-app.use(cookieParser()); // Parse cookies from requests
+app.use(cookieParser()); // REQUIRED to parse req.cookies.token
 
 // 3. Routes
-app.use("/api", authRouter);
+app.use("/api", authRoutes);
+app.use("/api", adminRoutes);
 
-app.get("/", (req, res) => {
-    res.send("FixMyCampus Backend is running!");
-});
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+app.listen(5000, () => console.log("Server running on port 5000"));
