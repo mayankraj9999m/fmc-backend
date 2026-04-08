@@ -10,31 +10,36 @@ const router = express.Router();
 // Setup Multer for temporary file storage
 const upload = multer({ dest: "uploads/" });
 
-// Middleware to authorize ONLY Junior Assistants
-const isJuniorAssistant = async (req, res, next) => {
+// Middleware to authorize ONLY Admins
+const isAdmin = async (req, res, next) => {
     if (!req.user || req.user.role !== "admin") {
         return res.status(403).json({ error: "Access denied. Admins only." });
     }
     try {
-        const adminResult = await pool.query("SELECT position FROM admins WHERE id = $1", [req.user.id]);
-        if (
-            adminResult.rows.length === 0 ||
-            adminResult.rows[0].position.toLowerCase() !== "Junior Assistant".toLowerCase()
-        ) {
-            return res.status(403).json({ error: "Access denied. Junior Assistants only." });
+        // Fetch position and hostel_name to attach them to the request for reliable RBAC
+        const adminResult = await pool.query("SELECT position, hostel_name FROM admins WHERE id = $1", [req.user.id]);
+        if (adminResult.rows.length === 0) {
+            return res.status(403).json({ error: "Access denied. Admin only." });
         }
+        req.user.position = adminResult.rows[0].position;
+        req.user.hostel_name = adminResult.rows[0].hostel_name;
         next();
     } catch (error) {
         res.status(500).json({ error: "Database error while verifying role." });
     }
 };
 
+// Helper function to check if the admin is restricted to a specific hostel
+const isRestrictedAdmin = (user) => {
+    return user.position === "Hostel Warden" || user.position === "Associate Warden";
+};
+
 // Apply authentication middleware to all routes below
 router.use(verifyToken);
-router.use(isJuniorAssistant);
+router.use(isAdmin);
 
 // 1. GET: Fetch all students
-router.get("/admin/jas/students", async (req, res) => {
+router.get("/", async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -43,49 +48,50 @@ router.get("/admin/jas/students", async (req, res) => {
         const search = req.query.search || "";
         const offset = (page - 1) * limit;
 
-        // Validation for sortBy to prevent SQL injection
         const allowedSortColumns = ["roll_no", "name", "email", "hostel_name", "room_no", "floor_no"];
         const validSortBy = allowedSortColumns.includes(sortBy) ? sortBy : "room_no";
 
-        let countQuery = "SELECT COUNT(*) FROM students";
-        let dataQuery = "SELECT * FROM students";
+        let countQuery = "SELECT COUNT(*) FROM students WHERE 1=1";
+        let dataQuery = "SELECT * FROM students WHERE 1=1";
         let queryParams = [];
-        let countParams = [];
+
+        // --- ROLE BASED ACCESS CONTROL ---
+        if (isRestrictedAdmin(req.user)) {
+            queryParams.push(req.user.hostel_name);
+            const hostelClause = ` AND hostel_name = $${queryParams.length}`;
+            countQuery += hostelClause;
+            dataQuery += hostelClause;
+        }
 
         // Apply Search Filter globally
         if (search) {
-            const searchPattern = `%${search}%`;
-            const searchClause = ` WHERE name ILIKE $1 OR roll_no ILIKE $1 OR email ILIKE $1 OR hostel_name ILIKE $1 OR room_no ILIKE $1`;
+            queryParams.push(`%${search}%`);
+            const searchClause = ` AND (name ILIKE $${queryParams.length} OR roll_no ILIKE $${queryParams.length} OR email ILIKE $${queryParams.length} OR hostel_name ILIKE $${queryParams.length} OR room_no ILIKE $${queryParams.length})`;
             countQuery += searchClause;
             dataQuery += searchClause;
-            queryParams.push(searchPattern);
-            countParams.push(searchPattern);
         }
 
-        // Apply Global Sorting
-        dataQuery += ` ORDER BY ${validSortBy} ${sortOrder}`;
+        // Apply Global Sorting & Pagination
+        dataQuery += ` ORDER BY ${validSortBy} ${sortOrder} LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
 
-        // Apply Pagination
-        const limitIndex = queryParams.length + 1;
-        const offsetIndex = queryParams.length + 2;
-        dataQuery += ` LIMIT $${limitIndex} OFFSET $${offsetIndex}`;
-        queryParams.push(limit, offset);
-
-        const countResult = await pool.query(countQuery, countParams);
+        // Execute queries
+        const countResult = await pool.query(
+            countQuery,
+            isRestrictedAdmin(req.user)
+                ? [req.user.hostel_name, search ? `%${search}%` : null].filter(Boolean)
+                : search
+                  ? [`%${search}%`]
+                  : [],
+        );
         const totalStudents = parseInt(countResult.rows[0].count);
         const totalPages = Math.ceil(totalStudents / limit);
 
+        queryParams.push(limit, offset);
         const result = await pool.query(dataQuery, queryParams);
 
         res.status(200).json({
             students: result.rows,
-            pagination: {
-                totalStudents,
-                fetchedStudents: result.rows.length,
-                totalPages,
-                currentPage: page,
-                limit,
-            },
+            pagination: { totalStudents, fetchedStudents: result.rows.length, totalPages, currentPage: page, limit },
         });
     } catch (error) {
         console.error("Error fetching students:", error);
@@ -94,29 +100,27 @@ router.get("/admin/jas/students", async (req, res) => {
 });
 
 // 2. POST: Upload & Parse CSV
-router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
-    // 1. Basic Check: Did the file upload at all?
+router.post("/upload-csv", upload.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded." });
 
-    // 2. File Type Validation: Ensure it's actually a CSV
     const isCsvMimeType = req.file.mimetype === "text/csv" || req.file.mimetype === "application/vnd.ms-excel";
     const isCsvExtension = req.file.originalname.toLowerCase().endsWith(".csv");
 
     if (!isCsvMimeType && !isCsvExtension) {
-        fs.unlinkSync(req.file.path); // Cleanup the invalid file
+        fs.unlinkSync(req.file.path); 
         return res.status(400).json({ error: "Invalid file format. Please upload a valid .csv file." });
     }
 
     const results = [];
     const errors = [];
     let successfulCount = 0;
+    const isRestricted = isRestrictedAdmin(req.user);
 
     const stream = fs.createReadStream(req.file.path);
 
     stream
         .pipe(
             csvParser({
-                // Cleans hidden characters/spaces from headers to prevent matching errors
                 mapHeaders: ({ header }) =>
                     header
                         .toLowerCase()
@@ -126,26 +130,22 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
         )
         .on("error", (error) => {
             console.error("CSV Parse Error:", error);
-            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); // Ensure cleanup on error
+            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); 
             res.status(500).json({ error: "Failed to read or parse the CSV file. It might be corrupted." });
         })
         .on("data", (data) => {
-            // Prevent pushing completely empty rows (often caused by trailing commas in Excel)
             if (Object.keys(data).length > 0 && Object.values(data).some((val) => val !== "")) {
                 results.push(data);
             }
         })
         .on("end", async () => {
             try {
-                // Delete the temporary file as soon as reading is done
                 if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
-                // 3. Empty File Check
                 if (results.length === 0) {
                     return res.status(400).json({ error: "The uploaded CSV file is empty or contains no valid data." });
                 }
 
-                // 4. Schema/Header Validation: Check if the required columns exist
                 const firstRow = results[0];
                 const hasRollNo = firstRow.hasOwnProperty("roll_no");
                 const hasName = firstRow.hasOwnProperty("name");
@@ -162,7 +162,7 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
                     const name = student["name"];
                     const room_no = student["room_no"] || null;
                     const floor_no = student["floor_no"] || null;
-                    const hostel_name = student["hostel_name"] || null;
+                    let hostel_name = student["hostel_name"] || null;
                     const email = student["email"] || `${roll_no?.toLowerCase()}@nitdelhi.ac.in`;
 
                     if (!roll_no || !name) {
@@ -171,14 +171,21 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
                         continue;
                     }
 
+                    // RBAC check for Wardens
+                    if (isRestricted) {
+                        if (hostel_name && hostel_name !== req.user.hostel_name) {
+                            errors.push({ type: "message", message: `Permission Denied for ${roll_no}: Cannot assign to ${hostel_name}.` });
+                            continue;
+                        }
+                        hostel_name = req.user.hostel_name; // Force assigned hostel
+                    }
+
                     try {
-                        // Check if a student exists with this Roll No OR Email
                         const checkQuery = await pool.query(
-                            `SELECT id FROM students WHERE roll_no = $1 OR email = $2`,
+                            `SELECT id, hostel_name FROM students WHERE roll_no = $1 OR email = $2`,
                             [roll_no, email],
                         );
 
-                        // Conflict Handling: Mismatched Data
                         if (checkQuery.rows.length > 1) {
                             errors.push({
                                 type: "message",
@@ -187,9 +194,16 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
                             continue;
                         }
 
-                        // Update Existing Student
                         if (checkQuery.rows.length === 1) {
-                            const studentId = checkQuery.rows[0].id;
+                            const existingStudent = checkQuery.rows[0];
+                            
+                            // RBAC: Verify if the restricted admin owns the existing student
+                            if (isRestricted && existingStudent.hostel_name !== req.user.hostel_name) {
+                                errors.push({ type: "message", message: `Permission Denied for ${roll_no}: Student currently belongs to another hostel.` });
+                                continue;
+                            }
+
+                            const studentId = existingStudent.id;
                             await pool.query(
                                 `UPDATE students 
                                  SET name = $1, roll_no = $2, email = $3, room_no = $4, floor_no = $5, hostel_name = $6
@@ -198,7 +212,6 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
                             );
                             successfulCount++;
                         }
-                        // Insert New Student
                         else {
                             await pool.query(
                                 `INSERT INTO students (roll_no, name, email, room_no, floor_no, hostel_name)
@@ -212,9 +225,8 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
                     }
                 }
 
-                // Final Response
                 res.status(200).json({
-                    message: `Processed CSV. Students added: ${successfulCount}, Errors: ${errors.length}`,
+                    message: `Processed CSV. Students added/updated: ${successfulCount}, Errors: ${errors.length}`,
                     errors,
                 });
             } catch (error) {
@@ -225,13 +237,16 @@ router.post("/admin/jas/upload-students", upload.single("file"), (req, res) => {
 });
 
 // 3. PUT: Update a specific student
-router.put("/admin/jas/students/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
     const { id } = req.params;
+    const isRestricted = isRestrictedAdmin(req.user);
 
-    // 1. Define the fields that the Junior Assistant is allowed to update
+    // RBAC: Prevent Warden from moving a student to another hostel
+    if (isRestricted && req.body.hostel_name && req.body.hostel_name !== req.user.hostel_name) {
+        return res.status(403).json({ error: "You cannot move a student to another hostel." });
+    }
+
     const allowedFields = ["name", "roll_no", "email", "hostel_name", "room_no", "floor_no"];
-
-    // 2. Dynamically build the query parts
     const setClauses = [];
     const values = [];
     let paramIndex = 1;
@@ -239,24 +254,32 @@ router.put("/admin/jas/students/:id", async (req, res) => {
     for (const field of allowedFields) {
         if (req.body[field] !== undefined) {
             setClauses.push(`${field} = $${paramIndex}`);
-
-            // Handle specific integer parsing for floor_no
             if (field === "floor_no") values.push(req.body[field] ? parseInt(req.body[field]) : null);
             else values.push(req.body[field]);
-
             paramIndex++;
         }
     }
 
-    // 3. If no valid fields were sent, return a 400 Bad Request
     if (setClauses.length === 0) return res.status(400).json({ error: "No valid fields provided to update." });
 
-    // 4. Add the 'id' as the final parameter for the WHERE clause
     values.push(id);
-    const query = `UPDATE students SET ${setClauses.join(", ")} WHERE id = $${paramIndex}`;
+    let query = `UPDATE students SET ${setClauses.join(", ")} WHERE id = $${paramIndex}`;
+
+    // RBAC: Warden can only update if the student belongs to their hostel
+    if (isRestricted) {
+        paramIndex++;
+        values.push(req.user.hostel_name);
+        query += ` AND hostel_name = $${paramIndex}`;
+    }
+
+    // Return the id to confirm a row was updated
+    query += ` RETURNING id`; 
 
     try {
-        await pool.query(query, values);
+        const result = await pool.query(query, values);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: "Student not found or permission denied to update." });
+        }
         res.status(200).json({ message: "Student updated successfully." });
     } catch (error) {
         console.error("Update Error:", error);
@@ -265,10 +288,26 @@ router.put("/admin/jas/students/:id", async (req, res) => {
 });
 
 // 4. DELETE: Remove a student
-router.delete("/admin/jas/students/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
     const { id } = req.params;
+    const isRestricted = isRestrictedAdmin(req.user);
+
+    let query = "DELETE FROM students WHERE id = $1";
+    let params = [id];
+
+    // RBAC: Only delete if student is in the Warden's hostel
+    if (isRestricted) {
+        query += " AND hostel_name = $2";
+        params.push(req.user.hostel_name);
+    }
+    
+    query += " RETURNING id";
+
     try {
-        await pool.query("DELETE FROM students WHERE id = $1", [id]);
+        const result = await pool.query(query, params);
+        if (result.rowCount === 0) {
+             return res.status(404).json({ error: "Student not found or permission denied." });
+        }
         res.status(200).json({ message: "Student deleted successfully." });
     } catch (error) {
         console.error("Delete Error:", error);
@@ -277,27 +316,35 @@ router.delete("/admin/jas/students/:id", async (req, res) => {
 });
 
 // 5. POST: Add a single student manually
-router.post("/admin/jas/student", async (req, res) => {
+router.post("/add", async (req, res) => {
     const { roll_no, name, email, hostel_name, room_no, floor_no } = req.body;
 
-    // Basic validation: Ensure required fields are present
     if (!roll_no || !name || !email) {
         return res.status(400).json({ error: "Roll No, Name, and Email are required." });
+    }
+
+    let finalHostelName = hostel_name;
+    const isRestricted = isRestrictedAdmin(req.user);
+
+    // RBAC: Enforce Warden's own hostel
+    if (isRestricted) {
+        if (hostel_name && hostel_name !== req.user.hostel_name) {
+            return res.status(403).json({ error: "You can only add students to your assigned hostel." });
+        }
+        finalHostelName = req.user.hostel_name;
     }
 
     try {
         await pool.query(
             `INSERT INTO students (roll_no, name, email, hostel_name, room_no, floor_no)
              VALUES ($1, $2, $3, $4, $5, $6)`,
-            [roll_no, name, email, hostel_name || null, room_no || null, floor_no ? parseInt(floor_no) : null],
+            [roll_no, name, email, finalHostelName || null, room_no || null, floor_no ? parseInt(floor_no) : null],
         );
 
         res.status(201).json({ message: "Student added successfully." });
     } catch (error) {
         console.error("Add Student Error:", error);
 
-        // PostgreSQL error code '23505' means a UNIQUE constraint was violated
-        // This handles cases where the roll_no or email already exists in the DB
         if (error.code === "23505") {
             return res.status(400).json({ error: "A student with this Roll No or Email already exists." });
         }
@@ -307,15 +354,14 @@ router.post("/admin/jas/student", async (req, res) => {
 });
 
 // 6. POST: Bulk Delete Students
-router.post("/admin/jas/students/bulk-delete", async (req, res) => {
+router.post("/bulk-delete", async (req, res) => {
     const { ids } = req.body;
+    const isRestricted = isRestrictedAdmin(req.user);
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: "No student IDs provided for deletion." });
     }
 
-    // 1. Filter out any invalid UUIDs to prevent PostgreSQL casting errors
-    // This regex ensures the ID perfectly matches the standard 36-character UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const validIds = ids.filter((id) => typeof id === "string" && uuidRegex.test(id));
 
@@ -324,23 +370,27 @@ router.post("/admin/jas/students/bulk-delete", async (req, res) => {
     }
 
     try {
-        // 2. The ANY($1::uuid[]) syntax efficiently matches multiple IDs
-        const result = await pool.query("DELETE FROM students WHERE id = ANY($1::uuid[])", [validIds]);
+        let query = "DELETE FROM students WHERE id = ANY($1::uuid[])";
+        let params = [validIds];
 
-        // 3. Handle specific deletion scenarios based on actual rows affected
+        // RBAC: Prevent Warden from bulk-deleting students outside their hostel
+        if (isRestricted) {
+            query += " AND hostel_name = $2";
+            params.push(req.user.hostel_name);
+        }
+
+        const result = await pool.query(query, params);
+
         if (result.rowCount === 0) {
-            // None of the provided IDs existed in the database
-            return res.status(404).json({ error: "No matching students found to delete." });
+            return res.status(404).json({ error: "No matching students found to delete or permission denied." });
         }
 
         if (result.rowCount < validIds.length) {
-            // Only some of the IDs were found and deleted
             return res.status(200).json({
-                message: `Partially successful. Deleted ${result.rowCount} students, but ${validIds.length - result.rowCount} IDs were not found.`,
+                message: `Partially successful. Deleted ${result.rowCount} students, but some were not found or you lacked permission.`,
             });
         }
 
-        // Perfect match: All IDs were found and deleted
         res.status(200).json({ message: `Successfully deleted ${result.rowCount} students.` });
     } catch (error) {
         console.error("Bulk Delete Error:", error);
@@ -349,15 +399,41 @@ router.post("/admin/jas/students/bulk-delete", async (req, res) => {
 });
 
 // GET: Export all students to CSV
-router.get("/admin/jas/students/export", async (req, res) => {
+router.get("/export", async (req, res) => {
     try {
-        const result = await pool.query(
-            "SELECT roll_no, name, email, hostel_name, room_no, floor_no FROM students ORDER BY room_no ASC",
-        );
+        // Extract filtering and sorting parameters from the query string
+        const sortBy = req.query.sortBy || "room_no";
+        const sortOrder = req.query.sortOrder === "DESC" ? "DESC" : "ASC";
+        const search = req.query.search || "";
+
+        // Validate sort columns to prevent SQL injection
+        const allowedSortColumns = ["roll_no", "name", "email", "hostel_name", "room_no", "floor_no"];
+        const validSortBy = allowedSortColumns.includes(sortBy) ? sortBy : "room_no";
+
+        let exportQuery = "SELECT roll_no, name, email, hostel_name, room_no, floor_no FROM students WHERE 1=1";
+        let params = [];
+
+        // 1. Apply RBAC for export
+        if (isRestrictedAdmin(req.user)) {
+            params.push(req.user.hostel_name);
+            exportQuery += ` AND hostel_name = $${params.length}`;
+        }
+
+        // 2. Apply Search Filter globally (Matches the frontend search)
+        if (search) {
+            params.push(`%${search}%`);
+            exportQuery += ` AND (name ILIKE $${params.length} OR roll_no ILIKE $${params.length} OR email ILIKE $${params.length} OR hostel_name ILIKE $${params.length} OR room_no ILIKE $${params.length})`;
+        }
+
+        // 3. Apply Dynamic Sorting (Matches the frontend column order)
+        exportQuery += ` ORDER BY ${validSortBy} ${sortOrder}`;
+
+        // Execute the query
+        const result = await pool.query(exportQuery, params);
 
         const students = result.rows;
         if (students.length === 0) {
-            return res.status(404).json({ error: "No students found to export." });
+            return res.status(404).json({ error: "No students found to export with the current filters." });
         }
 
         // Construct CSV
@@ -373,7 +449,8 @@ router.get("/admin/jas/students/export", async (req, res) => {
                 student.room_no || "",
                 student.floor_no || "",
             ];
-            csvRows.push(values.join(","));
+            // Wrap in quotes to prevent commas inside data from breaking columns, just in case
+            csvRows.push(values.map(val => `"${val}"`).join(",")); 
         }
 
         const csvString = csvRows.join("\n");

@@ -19,6 +19,8 @@ const generateTokenAndSetCookie = (res, user, role) => {
         email: user.email,
         role: role,
         hostel_name: user.hostel_name || null,
+        position: user.position || null,
+        requires_password_change: user.requires_password_change || false,
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
@@ -36,7 +38,7 @@ router.use(verifyToken);
 // ==========================================
 // 1. STUDENT LOGIN (Google OAuth)
 // ==========================================
-router.post("/auth/google", async (req, res) => {
+router.post("/google", async (req, res) => {
     const { code } = req.body;
 
     if (!code) return res.status(400).json({ error: "Authorization code missing." });
@@ -100,10 +102,9 @@ router.put("/student/onboard", verifyToken, async (req, res) => {
         }
 
         // Just update the flag so they aren't prompted next time
-        const result = await pool.query(
-            "UPDATE students SET is_onboarded = true WHERE id = $1 RETURNING *",
-            [req.user.id]
-        );
+        const result = await pool.query("UPDATE students SET is_onboarded = true WHERE id = $1 RETURNING *", [
+            req.user.id,
+        ]);
 
         res.status(200).json({ message: "Onboarding skipped.", user: result.rows[0] });
     } catch (error) {
@@ -158,7 +159,7 @@ router.put("/student/profile", verifyToken, async (req, res) => {
 // ==========================================
 // STAFF & ADMIN LOGIN (Email & Password)
 // ==========================================
-router.post("/auth/login", async (req, res) => {
+router.post("/login", async (req, res) => {
     const { email, password, role } = req.body;
 
     // 1. Validate inputs
@@ -215,7 +216,7 @@ router.post("/auth/login", async (req, res) => {
 // ==========================================
 // 3. GET CURRENT SESSION (Auto-Login via Cookie)
 // ==========================================
-router.get("/auth/profile", async (req, res) => {
+router.get("/profile", async (req, res) => {
     // Because verifyToken passed, we know req.user has the valid decoded JWT data
     try {
         if (!req.user)
@@ -229,10 +230,10 @@ router.get("/auth/profile", async (req, res) => {
             queryStr = "SELECT * FROM students WHERE google_id = $1 OR id::text = $1";
         } else if (role === "admin") {
             queryStr =
-                "SELECT id, name, email, phone_no, photo, position, hostel_name, last_login FROM admins WHERE id = $1";
+                "SELECT id, name, email, phone_no, photo, position, hostel_name, requires_password_change, last_login, created_at FROM admins WHERE id = $1";
         } else if (role === "worker") {
             queryStr =
-                "SELECT id, name, email, phone_no, gender, photo, hostel_name, department, sub_work_category, current_rating, rating_count, last_login FROM workers WHERE id = $1";
+                "SELECT id, name, email, phone_no, gender, photo, hostel_name, department, sub_work_category, current_rating, rating_count, last_login, created_at FROM workers WHERE id = $1";
         }
 
         const result = await pool.query(queryStr, [id]);
@@ -252,13 +253,57 @@ router.get("/auth/profile", async (req, res) => {
 // ==========================================
 // 4. LOGOUT
 // ==========================================
-router.post("/auth/logout", (req, res) => {
+router.post("/logout", (req, res) => {
     res.clearCookie("token", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
     });
     res.status(200).json({ message: "Logged out successfully" });
+});
+
+// ==========================================
+// UPDATE ADMIN PASSWORD
+// ==========================================
+router.put("/admin/profile/password", async (req, res) => {
+    try {
+        if (!req.user || req.user.role !== "admin") {
+            return res.status(403).json({ error: "Access denied." });
+        }
+
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: "Invalid password format." });
+        }
+
+        // Fetch current admin
+        const adminResult = await pool.query("SELECT * FROM admins WHERE id = $1", [req.user.id]);
+        if (adminResult.rows.length === 0) return res.status(404).json({ error: "Admin not found." });
+        const admin = adminResult.rows[0];
+
+        // Verify current password
+        const isMatch = await bcrypt.compare(currentPassword, admin.password_hash);
+        if (!isMatch) {
+            return res.status(400).json({ error: "Incorrect current password." });
+        }
+
+        // Hash new password and clear the requires_password_change flag
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+        await pool.query("UPDATE admins SET password_hash = $1, requires_password_change = false WHERE id = $2", [
+            hashedNewPassword,
+            req.user.id,
+        ]);
+
+        // Regenerate the cookie so the frontend knows the flag is now false
+        admin.requires_password_change = false;
+        generateTokenAndSetCookie(res, admin, "admin");
+
+        res.status(200).json({ message: "Password updated successfully." });
+    } catch (error) {
+        console.error("Password Update Error:", error);
+        res.status(500).json({ error: "Failed to update password." });
+    }
 });
 
 export default router;

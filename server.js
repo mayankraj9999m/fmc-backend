@@ -2,7 +2,9 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser"; // MUST BE INSTALLED: npm install cookie-parser
 import authRoutes from "./routes/authRoutes.js";
-import adminRoutes from "./routes/juniorAssistantRoutes.js";
+import adminRoutes from "./routes/AdminRoutes.js";
+import chiefWardenRoutes from "./routes/ChiefWardenRoutes.js";
+import wardenRoutes from "./routes/WardenRoutes.js";
 
 const app = express();
 
@@ -17,7 +19,9 @@ app.use(express.json());
 app.use(cookieParser()); // REQUIRED to parse req.cookies.token
 
 // 3. Routes
-app.use("/api", authRoutes);
-app.use("/api", adminRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/admin/students", adminRoutes);
+app.use("/api/admin/chief", chiefWardenRoutes);
+app.use("/api/admin/warden", wardenRoutes);
 
 app.listen(5000, () => console.log("Server running on port 5000"));
