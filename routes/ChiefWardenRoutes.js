@@ -50,7 +50,7 @@ router.get("/wardens", async (req, res) => {
 // ==========================================
 // 2. CREATE NEW WARDEN / ADMIN
 // ==========================================
-router.post("wardens", async (req, res) => {
+router.post("/wardens", async (req, res) => {
     try {
         const { name, email, phone_no, position, hostel_name } = req.body;
 
@@ -89,7 +89,7 @@ router.post("wardens", async (req, res) => {
 // ==========================================
 // 3. UPDATE WARDEN / ADMIN
 // ==========================================
-router.put("wardens/:id", async (req, res) => {
+router.put("/wardens/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const { name, email, phone_no, position, hostel_name, password } = req.body;
@@ -127,7 +127,7 @@ router.put("wardens/:id", async (req, res) => {
 // ==========================================
 // 4. DELETE WARDEN / ADMIN
 // ==========================================
-router.delete("wardens/:id", async (req, res) => {
+router.delete("/wardens/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query("DELETE FROM admins WHERE id = $1 RETURNING id", [id]);
@@ -140,6 +140,36 @@ router.delete("wardens/:id", async (req, res) => {
     } catch (error) {
         console.error("Delete Warden Error:", error);
         res.status(500).json({ error: "Failed to delete account." });
+    }
+});
+
+// ==========================================
+// 5. GET HOSTEL ANALYTICS
+// ==========================================
+router.get("/hostel-analytics", async (req, res) => {
+    try {
+        /*
+         * Groups complaints by the hostel of the student who lodged them.
+         * Assumes `complaints` table references a `student_id`, which joins with the `students` table to find the `hostel_name`.
+         */
+        const query = `
+            SELECT
+                COALESCE(s.hostel_name, 'Unknown') AS hostel_name,
+                COUNT(c.id)::int AS total_complaints,
+                COUNT(c.id) FILTER (WHERE c.status = 'Resolved')::int AS resolved_complaints,
+                COUNT(c.id) FILTER (WHERE c.status != 'Resolved')::int AS pending_complaints,
+                COUNT(c.id) FILTER (WHERE c.is_escalated = true AND c.status != 'Resolved')::int AS escalated_complaints
+            FROM complaints c
+            LEFT JOIN students s ON c.student_id = s.id
+            GROUP BY s.hostel_name
+            ORDER BY s.hostel_name ASC;
+        `;
+        
+        const result = await pool.query(query);
+        res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Fetch Hostel Analytics Error:", error);
+        res.status(500).json({ error: "Failed to fetch hostel analytics." });
     }
 });
 

@@ -7,9 +7,9 @@ const { Pool } = pg;
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: {
-        rejectUnauthorized: false, // Required for Neon DB
-    },
+    // ssl: {
+    //     rejectUnauthorized: false, // Required for Neon DB
+    // },
 });
 
 // Test the connection

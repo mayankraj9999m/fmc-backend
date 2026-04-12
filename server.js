@@ -5,6 +5,8 @@ import authRoutes from "./routes/authRoutes.js";
 import adminRoutes from "./routes/AdminRoutes.js";
 import chiefWardenRoutes from "./routes/ChiefWardenRoutes.js";
 import wardenRoutes from "./routes/WardenRoutes.js";
+import complaintRoutes from './routes/complaintRoutes.js';
+import announcementRoutes from './routes/announcementRoutes.js';
 
 const app = express();
 
@@ -20,8 +22,10 @@ app.use(cookieParser()); // REQUIRED to parse req.cookies.token
 
 // 3. Routes
 app.use("/api/auth", authRoutes);
+app.use('/api/announcements', announcementRoutes);
 app.use("/api/admin/students", adminRoutes);
 app.use("/api/admin/chief", chiefWardenRoutes);
 app.use("/api/admin/warden", wardenRoutes);
+app.use('/api/complaints', complaintRoutes);
 
 app.listen(5000, () => console.log("Server running on port 5000"));

@@ -3,6 +3,7 @@ import express from "express";
 import pool from "../db/db.js";
 import bcrypt from "bcrypt";
 import { verifyToken } from "../middleware/authMiddleware.js";
+import { getWorkerComplaintsForWarden, getWorkerPerformance } from "../controllers/wardenController.js";
 
 const router = express.Router();
 
@@ -49,7 +50,7 @@ router.get("/workers", async (req, res) => {
              FROM workers 
              WHERE hostel_name = $1 
              ORDER BY created_at DESC`,
-            [req.wardenHostel]
+            [req.wardenHostel],
         );
         res.status(200).json(result.rows);
     } catch (error) {
@@ -76,7 +77,16 @@ router.post("/workers", async (req, res) => {
             `INSERT INTO workers (name, email, password_hash, phone_no, gender, hostel_name, department, sub_work_category) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
              RETURNING id, name, email, department, sub_work_category`,
-            [name, email, hashedPassword, phone_no || null, gender || null, req.wardenHostel, department, sub_work_category || null]
+            [
+                name,
+                email,
+                hashedPassword,
+                phone_no || null,
+                gender || null,
+                req.wardenHostel,
+                department,
+                sub_work_category || null,
+            ],
         );
 
         res.status(201).json({
@@ -100,12 +110,16 @@ router.put("/workers/:id", async (req, res) => {
         const { name, email, phone_no, gender, department, sub_work_category, password } = req.body;
 
         // Ensure the worker belongs to the warden's hostel before updating
-        const checkOwnership = await pool.query("SELECT id FROM workers WHERE id = $1 AND hostel_name = $2", [id, req.wardenHostel]);
+        const checkOwnership = await pool.query("SELECT id FROM workers WHERE id = $1 AND hostel_name = $2", [
+            id,
+            req.wardenHostel,
+        ]);
         if (checkOwnership.rows.length === 0) {
             return res.status(404).json({ error: "Worker not found in your assigned hostel." });
         }
 
-        let updateQuery = "UPDATE workers SET name = $1, email = $2, phone_no = $3, gender = $4, department = $5, sub_work_category = $6";
+        let updateQuery =
+            "UPDATE workers SET name = $1, email = $2, phone_no = $3, gender = $4, department = $5, sub_work_category = $6";
         let values = [name, email, phone_no || null, gender || null, department, sub_work_category || null];
 
         if (password && password.trim() !== "") {
@@ -132,12 +146,12 @@ router.put("/workers/:id", async (req, res) => {
 router.delete("/workers/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        
+
         // Ensure the worker belongs to the warden's hostel before deleting
-        const result = await pool.query(
-            "DELETE FROM workers WHERE id = $1 AND hostel_name = $2 RETURNING id", 
-            [id, req.wardenHostel]
-        );
+        const result = await pool.query("DELETE FROM workers WHERE id = $1 AND hostel_name = $2 RETURNING id", [
+            id,
+            req.wardenHostel,
+        ]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: "Worker not found in your assigned hostel." });
@@ -149,5 +163,8 @@ router.delete("/workers/:id", async (req, res) => {
         res.status(500).json({ error: "Failed to delete worker account." });
     }
 });
+
+router.get("/performance", getWorkerPerformance);
+router.get("/workers/:id/complaints", getWorkerComplaintsForWarden);
 
 export default router;
