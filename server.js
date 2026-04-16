@@ -29,7 +29,7 @@ app.use("/api/admin/warden", wardenRoutes);
 app.use('/api/complaints', complaintRoutes);
 
 if (process.env.NODE_ENV !== 'production') {
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(process.env.PORT, () => console.log(`Server running on port ${PORT}`));
 }
 
 export default app; 
