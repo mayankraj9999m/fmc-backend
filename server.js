@@ -28,6 +28,8 @@ app.use("/api/admin/chief", chiefWardenRoutes);
 app.use("/api/admin/warden", wardenRoutes);
 app.use('/api/complaints', complaintRoutes);
 
-app.listen(5000, () => console.log("Server running on port 5000"));
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}
 
 export default app; 
