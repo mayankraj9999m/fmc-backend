@@ -22,6 +22,10 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser()); // REQUIRED to parse req.cookies.token
 
+app.get("/", (req, res) => {
+    res.send(`FixMyCampus Backend is running on PORT${process.env.PORT}!`);
+});
+
 // 3. Routes
 app.use("/api/auth", authRoutes);
 app.use('/api/announcements', announcementRoutes);
@@ -29,5 +33,6 @@ app.use("/api/admin/students", adminRoutes);
 app.use("/api/admin/chief", chiefWardenRoutes);
 app.use("/api/admin/warden", wardenRoutes);
 app.use('/api/complaints', complaintRoutes);
+
 
 app.listen(process.env.PORT, () => console.log(`Server running on port ${process.env.PORT}`));
