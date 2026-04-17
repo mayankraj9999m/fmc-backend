@@ -10,6 +10,8 @@ import announcementRoutes from './routes/announcementRoutes.js';
 
 const app = express();
 
+app.set("trust proxy", 1);
+
 // 1. CORS Configuration
 app.use(cors({
     origin: process.env.FRONTEND_URL || "http://localhost:5173",
