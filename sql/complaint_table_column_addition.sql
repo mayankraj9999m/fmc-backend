@@ -1,1 +1,0 @@
-ALTER TABLE public.complaints ADD COLUMN resolution_message text;
