@@ -11,8 +11,8 @@ describe('Complaint Lifecycle', () => {
       method: 'POST',
       url: '/api/complaints/student',
       body: {
-        department: 'Electrical',
-        sub_category: 'Light bulb fused', // Must match work_department exactly if there's an FK check
+        department: 'Civil',
+        sub_category: 'Plumbing', // Must match work_department exactly if there's an FK check
         description: 'Test complaint description'
       }
     }).then((res) => {

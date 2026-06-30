@@ -32,6 +32,7 @@ jobs:
           wait-on: "http://localhost:5000"
           wait-on-timeout: 120
         env:
+          CYPRESS_CI: "true"
           # Pass secrets from GitHub directly to Cypress and Node.js
           CYPRESS_ADMIN_EMAIL: ${{ secrets.CYPRESS_ADMIN_EMAIL }}
           CYPRESS_ADMIN_PASSWORD: ${{ secrets.CYPRESS_ADMIN_PASSWORD }}
