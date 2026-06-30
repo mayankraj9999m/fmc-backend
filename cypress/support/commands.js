@@ -42,8 +42,8 @@ Cypress.Commands.add('loginAsWorker', (email, password) => {
 
 Cypress.Commands.add('loginAsStudent', () => {
   cy.session('student-google', () => {
-    // If running in CI (GitHub Actions), bypass the popup entirely
-    if (Cypress.env('CI')) {
+    // If running in CI (GitHub Actions) OR running headlessly in the terminal, bypass the popup
+    if (Cypress.env('CI') || !Cypress.config('isInteractive')) {
       const jwtSecret = Cypress.env('JWT_SECRET');
       const testStudentId = Cypress.env('TEST_STUDENT_ID');
       const testStudentEmail = Cypress.env('TEST_STUDENT_EMAIL');
