@@ -2,3 +2,6 @@ node_modules
 .env
 .env.production
 new
+cypress.env.json
+cypress/videos
+cypress/screenshots
