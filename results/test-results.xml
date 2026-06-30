@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="Mocha Tests" time="7.253" tests="8" failures="0">
+  <testsuite name="Root Suite" timestamp="2026-06-30T05:23:33" tests="0" file="cypress\e2e\warden-workers.cy.js" time="0.000" failures="0">
+  </testsuite>
+  <testsuite name="Warden Worker Management" timestamp="2026-06-30T05:23:33" tests="8" time="7.250" failures="0">
+    <testcase name="Warden Worker Management should list workers for warden hostel" time="1.061" classname="should list workers for warden hostel">
+    </testcase>
+    <testcase name="Warden Worker Management should create a new worker" time="0.465" classname="should create a new worker">
+    </testcase>
+    <testcase name="Warden Worker Management should fail to create duplicate worker" time="0.498" classname="should fail to create duplicate worker">
+    </testcase>
+    <testcase name="Warden Worker Management should fail to create worker with missing fields" time="0.093" classname="should fail to create worker with missing fields">
+    </testcase>
+    <testcase name="Warden Worker Management should update the created worker" time="3.190" classname="should update the created worker">
+    </testcase>
+    <testcase name="Warden Worker Management should fetch worker performance stats" time="0.402" classname="should fetch worker performance stats">
+    </testcase>
+    <testcase name="Warden Worker Management should fetch complaints for a specific worker" time="0.912" classname="should fetch complaints for a specific worker">
+    </testcase>
+    <testcase name="Warden Worker Management should delete the created worker" time="0.333" classname="should delete the created worker">
+    </testcase>
+  </testsuite>
+</testsuites>

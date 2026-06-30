@@ -1,0 +1,75 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  test:
+    name: Run API Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Cypress Tests
+        uses: cypress-io/github-action@v6
+        with:
+          # Start the Express server before running tests
+          start: npm run start
+          wait-on: "http://localhost:5000"
+          wait-on-timeout: 120
+        env:
+          # Pass secrets from GitHub directly to Cypress and Node.js
+          CYPRESS_ADMIN_EMAIL: ${{ secrets.CYPRESS_ADMIN_EMAIL }}
+          CYPRESS_ADMIN_PASSWORD: ${{ secrets.CYPRESS_ADMIN_PASSWORD }}
+          CYPRESS_CHIEF_WARDEN_EMAIL: ${{ secrets.CYPRESS_CHIEF_WARDEN_EMAIL }}
+          CYPRESS_CHIEF_WARDEN_PASSWORD: ${{ secrets.CYPRESS_CHIEF_WARDEN_PASSWORD }}
+          CYPRESS_WARDEN_EMAIL: ${{ secrets.CYPRESS_WARDEN_EMAIL }}
+          CYPRESS_WARDEN_PASSWORD: ${{ secrets.CYPRESS_WARDEN_PASSWORD }}
+          CYPRESS_WORKER_EMAIL: ${{ secrets.CYPRESS_WORKER_EMAIL }}
+          CYPRESS_WORKER_PASSWORD: ${{ secrets.CYPRESS_WORKER_PASSWORD }}
+          CYPRESS_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+
+          # Backend Environment Variables
+          PORT: 5000
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+
+      - name: Upload Test Results
+        if: always() # Run even if tests fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: cypress-test-results
+          path: results/
+          retention-days: 7
+
+  deploy:
+    name: Deploy to Render
+    needs: test # Ensure tests pass before deploying
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' # Only deploy on main branch
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        run: |
+          echo "Triggering deployment on Render..."
+          curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
