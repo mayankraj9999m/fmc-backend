@@ -42,7 +42,19 @@ Cypress.Commands.add('loginAsWorker', (email, password) => {
 
 Cypress.Commands.add('loginAsStudent', () => {
   cy.session('student-google', () => {
-    // 1. Get Google Client ID from env
+    // If running in CI (GitHub Actions), bypass the popup entirely
+    if (Cypress.env('CI')) {
+      const jwtSecret = Cypress.env('JWT_SECRET');
+      const testStudentId = Cypress.env('TEST_STUDENT_ID');
+      const testStudentEmail = Cypress.env('TEST_STUDENT_EMAIL');
+      
+      cy.task('generateTestToken', { jwtSecret, testStudentId, testStudentEmail }).then((token) => {
+        cy.setCookie('token', token, { httpOnly: true, secure: false, sameSite: 'lax' });
+      });
+      return;
+    }
+
+    // Local environment: use the real Google popup flow
     const clientId = Cypress.env('GOOGLE_CLIENT_ID')
     
     // 2. Run the Node.js task to open browser and wait for auth code

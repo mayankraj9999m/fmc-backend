@@ -42,7 +42,9 @@ jobs:
           CYPRESS_WORKER_EMAIL: ${{ secrets.CYPRESS_WORKER_EMAIL }}
           CYPRESS_WORKER_PASSWORD: ${{ secrets.CYPRESS_WORKER_PASSWORD }}
           CYPRESS_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-
+          CYPRESS_TEST_STUDENT_ID: ${{ secrets.CYPRESS_TEST_STUDENT_ID }}
+          CYPRESS_TEST_STUDENT_EMAIL: ${{ secrets.CYPRESS_TEST_STUDENT_EMAIL }}
+          
           # Backend Environment Variables
           PORT: 5000
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

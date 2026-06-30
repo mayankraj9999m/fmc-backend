@@ -3,6 +3,7 @@ import open from "open";
 import http from "http";
 import url from "url";
 import dotenv from "dotenv";
+import jwt from "jsonwebtoken";
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ export default defineConfig({
     setupNodeEvents(on, config) {
       // Pass JWT secret to cypress env
       config.env.JWT_SECRET = process.env.JWT_SECRET;
+      config.env.CI = process.env.CI === 'true';
       
       on('task', {
         googleLogin({ clientId }) {
@@ -56,6 +58,17 @@ export default defineConfig({
               reject(new Error("Google Login timed out after 120 seconds"));
             }, 120000);
           });
+        },
+        generateTestToken({ jwtSecret, testStudentId, testStudentEmail }) {
+          const payload = {
+            id: testStudentId,
+            email: testStudentEmail,
+            role: 'student',
+            hostel_name: null,
+            position: null,
+            requires_password_change: false,
+          };
+          return jwt.sign(payload, jwtSecret, { expiresIn: "7d" });
         }
       });
       return config;
