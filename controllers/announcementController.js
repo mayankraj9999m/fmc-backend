@@ -1,4 +1,5 @@
 import pool from "../db/db.js";
+import { GoogleGenAI } from "@google/genai";
 
 // ==========================================
 // 1. CREATE ANNOUNCEMENT
@@ -151,3 +152,65 @@ export const getAnnouncements = async (req, res) => {
         });
     }
 };
+
+// ==========================================
+// 3. SUMMARIZE ANNOUNCEMENTS
+// ==========================================
+export const summarizeAnnouncements = async (req, res) => {
+    try {
+        const user = req.user;
+        let query = `
+            SELECT title, content, type, created_at 
+            FROM announcements a
+            WHERE 1=1
+        `;
+        const values = [];
+
+        if (user.role === "student") {
+            values.push(user.hostel_name);
+            query += ` AND (a.type = 'Common' OR ((a.type = 'Hostel' OR a.type = 'Worker') AND a.hostel_name = $1))`;
+        } else if (user.role === "admin") {
+            if (user.position === "Hostel Warden" || user.position === "Associate Warden") {
+                values.push(user.hostel_name);
+                query += ` AND (a.type = 'Common' OR a.hostel_name = $1)`;
+            }
+        } else if (user.role === "worker") {
+            values.push(user.hostel_name);
+            query += ` AND (a.type = 'Common' OR a.hostel_name = $1)`;
+        }
+
+        query += " ORDER BY a.created_at DESC LIMIT 30"; // Summarize recent 30 announcements
+
+        const result = await pool.query(query, values);
+
+        if (result.rowCount === 0) {
+            return res.json({ summary: "No recent announcements to summarize." });
+        }
+
+        const dataStr = JSON.stringify(result.rows);
+
+        const prompt = `
+        You are an AI assistant for a campus maintenance system.
+        Here are the recent announcements that the user can see.
+        Format your response in Markdown.
+        Identify and summarize ONLY the most critical, high-attention, and urgent announcements. 
+        If there are no critical announcements, mention that there is nothing urgent to report. 
+        Keep the summary concise and actionable under 100 words.
+
+        Announcements Data:
+        ${dataStr}
+        `;
+
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+
+        res.json({ summary: response.text });
+    } catch (error) {
+        console.error("Error summarizing announcements:", error);
+        res.status(500).json({ error: "Failed to generate summary." });
+    }
+};
+

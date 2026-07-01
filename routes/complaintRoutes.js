@@ -10,6 +10,7 @@ import {
     resolveComplaint,
     provideFeedback,
     generateAIComplaintDetails,
+    summarizeWorkerComplaints,
 } from "../controllers/complaintController.js";
 
 const router = express.Router();
@@ -44,6 +45,7 @@ const workerRouter = express.Router();
 workerRouter.use(verifyRole("worker")); // Check role
 
 workerRouter.get("/dashboard", getWorkerDashboardStats);
+workerRouter.get("/summarize", summarizeWorkerComplaints);
 workerRouter.put(
     "/:id/resolve",
     upload.single("resolved_image"),

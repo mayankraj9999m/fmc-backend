@@ -95,6 +95,39 @@ router.post("/google", async (req, res) => {
     }
 });
 
+// ==========================================
+// 1.5. DEV STUDENT LOGIN (By Roll No) - Local only
+// ==========================================
+router.post("/dev-login", async (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+        return res.status(403).json({ error: "Forbidden in production." });
+    }
+
+    const { roll_no } = req.body;
+    if (!roll_no) return res.status(400).json({ error: "Roll number missing." });
+
+    try {
+        let userResult = await pool.query("SELECT * FROM students WHERE roll_no = $1", [roll_no]);
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: "Student not found with this roll number." });
+        }
+        
+        let user = userResult.rows[0];
+        
+        const updateResult = await pool.query(
+            `UPDATE students SET last_login = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
+            [user.id]
+        );
+        
+        user = updateResult.rows[0];
+        generateTokenAndSetCookie(res, user, "student");
+        res.status(200).json({ user, role: "student" });
+    } catch (error) {
+        console.error("Dev Auth Error:", error);
+        res.status(500).json({ error: "Authentication failed." });
+    }
+});
+
 router.put("/student/onboard", verifyToken, async (req, res) => {
     try {
         if (!req.user || req.user.role !== "student") {

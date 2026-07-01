@@ -6,6 +6,7 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 import {
     getWorkerComplaintsForWarden,
     getWorkerPerformance,
+    summarizeWorkerPerformance,
 } from "../controllers/wardenController.js";
 
 const router = express.Router();
@@ -206,6 +207,7 @@ router.delete("/workers/:id", async (req, res) => {
 });
 
 router.get("/performance", getWorkerPerformance);
+router.get("/performance/summarize", summarizeWorkerPerformance);
 router.get("/workers/:id/complaints", getWorkerComplaintsForWarden);
 
 export default router;

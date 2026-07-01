@@ -250,6 +250,7 @@ export const getStudentDashboardStats = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const status = req.query.status || "";
+        const priority = req.query.priority || "";
         const offset = (page - 1) * limit;
 
         // Fetch stats
@@ -268,11 +269,16 @@ export const getStudentDashboardStats = async (req, res) => {
 
         if (status) {
             if (status === "Escalated") {
-                statusCondition = " AND c.is_escalated = true";
+                statusCondition += " AND c.is_escalated = true";
             } else {
-                statusCondition = " AND c.status = $2";
                 queryParams.push(status);
+                statusCondition += ` AND c.status = $${queryParams.length}`;
             }
+        }
+
+        if (priority) {
+            queryParams.push(priority);
+            statusCondition += ` AND c.priority_score = $${queryParams.length}`;
         }
 
         // Get total count for pagination
@@ -367,7 +373,28 @@ export const provideFeedback = async (req, res) => {
             });
         }
 
-        res.json(updated.rows[0]);
+        const complaint = updated.rows[0];
+
+        // Recalculate and update the worker's average rating if assigned
+        if (complaint.worker_id) {
+            const statsResult = await pool.query(
+                `SELECT ROUND(AVG(rating)::numeric, 1) as avg_rating, COUNT(rating) as rating_count 
+                 FROM complaints 
+                 WHERE worker_id = $1 AND rating IS NOT NULL`,
+                [complaint.worker_id]
+            );
+
+            const { avg_rating, rating_count } = statsResult.rows[0];
+
+            await pool.query(
+                `UPDATE workers 
+                 SET current_rating = $1, rating_count = $2 
+                 WHERE id = $3`,
+                [avg_rating || 0, rating_count || 0, complaint.worker_id]
+            );
+        }
+
+        res.json(complaint);
     } catch (err) {
         console.error("Error submitting feedback:", err);
         res.status(500).json({
@@ -386,6 +413,7 @@ export const getWorkerDashboardStats = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const status = req.query.status || "";
+        const priority = req.query.priority || "";
         const offset = (page - 1) * limit;
 
         const stats = await pool.query(
@@ -402,11 +430,16 @@ export const getWorkerDashboardStats = async (req, res) => {
 
         if (status) {
             if (status === "Escalated") {
-                statusCondition = " AND c.is_escalated = true";
+                statusCondition += " AND c.is_escalated = true";
             } else {
-                statusCondition = " AND c.status = $2";
                 queryParams.push(status);
+                statusCondition += ` AND c.status = $${queryParams.length}`;
             }
+        }
+
+        if (priority) {
+            queryParams.push(priority);
+            statusCondition += ` AND c.priority_score = $${queryParams.length}`;
         }
 
         const countQuery = `SELECT COUNT(*) FROM complaints c WHERE c.worker_id = $1 ${statusCondition}`;
@@ -481,5 +514,46 @@ export const resolveComplaint = async (req, res) => {
         res.status(500).json({
             error: "An unexpected error occurred while resolving the complaint.",
         });
+    }
+};
+
+export const summarizeWorkerComplaints = async (req, res) => {
+    try {
+        const worker_id = req.user?.id;
+        
+        // Fetch worker's active/unresolved complaints
+        const complaintsResult = await pool.query(
+            `SELECT complaint_no, department, sub_category, description, priority_score, status, lodged_at
+             FROM complaints
+             WHERE worker_id = $1 AND status != 'Resolved'
+             ORDER BY priority_score DESC, lodged_at ASC`,
+            [worker_id]
+        );
+
+        if (complaintsResult.rowCount === 0) {
+            return res.json({ summary: "You currently have no active assigned tasks. Great job!" });
+        }
+
+        const complaintsData = JSON.stringify(complaintsResult.rows);
+
+        const prompt = `
+        You are an AI assistant for a campus maintenance system. Summarize the following active tasks for a maintenance worker.
+        Format your response in Markdown.
+        Highlight high-priority tasks, group similar tasks if applicable, and provide a concise, encouraging, and actionable summary of their current workload under 100 words.
+        
+        Tasks Data:
+        ${complaintsData}
+        `;
+
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+
+        res.json({ summary: response.text });
+    } catch (err) {
+        console.error("Error summarizing worker complaints:", err);
+        res.status(500).json({ error: "Failed to generate summary." });
     }
 };

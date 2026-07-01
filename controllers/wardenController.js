@@ -1,4 +1,5 @@
 import pool from "../db/db.js";
+import { GoogleGenAI } from "@google/genai";
 
 export const getWorkerPerformance = async (req, res) => {
     try {
@@ -78,26 +79,33 @@ export const getWorkerComplaintsForWarden = async (req, res) => {
                 .json({ error: "Unauthorized access to this worker's data." });
         }
 
+        const priority = req.query.priority || "";
+        
+        let queryParams = [id];
+        let condition = "";
+        
+        if (priority) {
+            queryParams.push(priority);
+            condition = ` AND c.priority_score = $2`;
+        }
+
         // Get total count for pagination
-        const countQuery = `SELECT COUNT(*) FROM complaints WHERE worker_id = $1`;
-        const totalCountRes = await pool.query(countQuery, [id]);
+        const countQuery = `SELECT COUNT(*) FROM complaints c WHERE c.worker_id = $1 ${condition}`;
+        const totalCountRes = await pool.query(countQuery, queryParams);
         const totalRecords = parseInt(totalCountRes.rows[0].count);
         const totalPages = Math.ceil(totalRecords / limit);
 
         // Fetch paginated complaints with student details
+        const paginationParams = [...queryParams, limit, offset];
         const complaintsQuery = `
             SELECT c.*, s.name AS student_name, s.room_no, s.hostel_name, s.phone_no AS student_phone
             FROM complaints c
             LEFT JOIN students s ON c.student_id = s.id
-            WHERE c.worker_id = $1
+            WHERE c.worker_id = $1 ${condition}
             ORDER BY c.assigned_at DESC NULLS LAST
-            LIMIT $2 OFFSET $3
+            LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
         `;
-        const complaintsRes = await pool.query(complaintsQuery, [
-            id,
-            limit,
-            offset,
-        ]);
+        const complaintsRes = await pool.query(complaintsQuery, paginationParams);
 
         res.json({
             history: complaintsRes.rows,
@@ -106,5 +114,54 @@ export const getWorkerComplaintsForWarden = async (req, res) => {
     } catch (error) {
         console.error("Error fetching worker complaints:", error);
         res.status(500).json({ error: "Failed to fetch complaints." });
+    }
+};
+
+export const summarizeWorkerPerformance = async (req, res) => {
+    try {
+        const hostel_name = req.user?.hostel_name;
+        if (!hostel_name) return res.status(403).json({ error: "Warden hostel context missing." });
+
+        const simplerQuery = `
+            SELECT 
+                w.department,
+                COUNT(DISTINCT w.id) as worker_count,
+                ROUND(AVG(w.current_rating)::numeric, 1) as avg_rating,
+                COUNT(c.id) FILTER (WHERE c.status = 'Resolved') as total_resolved,
+                COUNT(c.id) FILTER (WHERE c.is_escalated = true AND c.status != 'Resolved') as total_defaulted
+            FROM workers w
+            LEFT JOIN complaints c ON w.id = c.worker_id
+            WHERE w.hostel_name = $1
+            GROUP BY w.department
+        `;
+
+        const result = await pool.query(simplerQuery, [hostel_name]);
+
+        if (result.rowCount === 0) {
+            return res.json({ summary: "No worker data available for summarization." });
+        }
+
+        const dataStr = JSON.stringify(result.rows);
+
+        const prompt = `
+        You are an AI assistant helping a hostel warden manage their staff.
+        Here is the aggregate performance data of the workers grouped by department for their hostel.
+        Format your response in Markdown using tables.
+        Provide a concise managerial summary under 80 words. Highlight which departments are performing well (high rating/resolved tasks) and which are struggling (high defaulted tasks, low rating). Provide brief, actionable advice.
+
+        Performance Data:
+        ${dataStr}
+        `;
+
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+
+        res.json({ summary: response.text });
+    } catch (error) {
+        console.error("Error summarizing performance:", error);
+        res.status(500).json({ error: "Failed to generate summary." });
     }
 };
