@@ -1,21 +1,31 @@
 import pool from "../db/db.js";
 import { uploadToCloudinary } from "../config/cloudinary.js";
+import { GoogleGenAI } from "@google/genai";
 
 // --- STUDENT CONTROLLERS ---
 export const lodgeComplaint = async (req, res) => {
     const client = await pool.connect(); // Use a client for transaction safety
     try {
-        const { department, sub_category, description } = req.body;
+        const { department, sub_category, description, priority_score } =
+            req.body;
         const student_id = req.user?.id;
 
         // 1. Strict Input Validation
-        if (!department?.trim() || !sub_category?.trim() || !description?.trim()) {
-            return res.status(400).json({ error: "Department, sub-category, and description are required." });
+        if (
+            !department?.trim() ||
+            !sub_category?.trim() ||
+            !description?.trim()
+        ) {
+            return res.status(400).json({
+                error: "Department, sub-category, and description are required.",
+            });
         }
 
         const trimmedDesc = description.trim();
         if (trimmedDesc.split(/\s+/).length > 40) {
-            return res.status(400).json({ error: "Description must be 40 words or less." });
+            return res
+                .status(400)
+                .json({ error: "Description must be 40 words or less." });
         }
 
         await client.query("BEGIN");
@@ -42,12 +52,18 @@ export const lodgeComplaint = async (req, res) => {
         // 3. Handle Cloudinary Upload (Only happens if the user passes the duplicate check)
         let complaint_image = null;
         if (req.file) {
-            const uploadResult = await uploadToCloudinary(req.file.buffer, "hostel_complaints");
+            const uploadResult = await uploadToCloudinary(
+                req.file.buffer,
+                "hostel_complaints",
+            );
             complaint_image = uploadResult.secure_url;
         }
 
         // 4. Find the student's hostel
-        const studentRes = await client.query("SELECT hostel_name FROM students WHERE id = $1", [student_id]);
+        const studentRes = await client.query(
+            "SELECT hostel_name FROM students WHERE id = $1",
+            [student_id],
+        );
         const hostel_name = studentRes.rows[0]?.hostel_name;
 
         // 5. Find the best worker candidate (Equal Assignment Logic)
@@ -64,7 +80,8 @@ export const lodgeComplaint = async (req, res) => {
             [hostel_name, department.trim(), sub_category.trim()],
         );
 
-        const worker_id = workerRes.rows.length > 0 ? workerRes.rows[0].id : null;
+        const worker_id =
+            workerRes.rows.length > 0 ? workerRes.rows[0].id : null;
         const status = worker_id ? "Worker assigned" : "Initiated";
         const assigned_at = worker_id ? new Date() : null;
 
@@ -72,9 +89,9 @@ export const lodgeComplaint = async (req, res) => {
         const newComplaint = await client.query(
             `INSERT INTO complaints (
                 student_id, department, sub_category, description, 
-                complaint_image, worker_id, status, assigned_at
+                complaint_image, worker_id, status, assigned_at, priority_score
              ) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
             [
                 student_id,
                 department.trim(),
@@ -84,6 +101,7 @@ export const lodgeComplaint = async (req, res) => {
                 worker_id,
                 status,
                 assigned_at,
+                priority_score || "Medium",
             ],
         );
 
@@ -99,9 +117,127 @@ export const lodgeComplaint = async (req, res) => {
             });
         }
 
-        res.status(500).json({ error: "An unexpected error occurred while lodging the complaint." });
+        res.status(500).json({
+            error: "An unexpected error occurred while lodging the complaint.",
+        });
     } finally {
         client.release();
+    }
+};
+
+export const generateAIComplaintDetails = async (req, res) => {
+    try {
+        const { description } = req.body;
+
+        if (!description?.trim()) {
+            return res
+                .status(400)
+                .json({ error: "Description is required for AI processing." });
+        }
+
+        if (!process.env.GEMINI_API_KEY) {
+            return res
+                .status(500)
+                .json({
+                    error: "Gemini API key is not configured on the server.",
+                });
+        }
+
+        // Fetch valid departments and sub-categories from DB
+        let categoryString = "";
+        try {
+            const deptRes = await pool.query(
+                "SELECT department, sub_category FROM work_department",
+            );
+            const validCategories = deptRes.rows;
+
+            if (validCategories.length === 0) {
+                throw new Error("No work departments found in the database.");
+            }
+
+            // Format them for the prompt (e.g. "Electrical": ["Fan Repair", "Light Issue"])
+            const categoryMap = {};
+            validCategories.forEach((row) => {
+                if (!categoryMap[row.department])
+                    categoryMap[row.department] = [];
+                categoryMap[row.department].push(row.sub_category);
+            });
+            categoryString = JSON.stringify(categoryMap, null, 2);
+        } catch (dbErr) {
+            console.warn(
+                "Could not fetch categories from DB, using fallback:",
+                dbErr.message,
+            );
+            // Fallback to constants if DB connection times out
+            categoryString = JSON.stringify(
+                {
+                    Civil: ["Carpentry", "Plumbing", "Wall and roof"],
+                    Electrical: ["Electrician", "Lift maintainer"],
+                    "IT/Network": ["No signal incoming", "Software Problem"],
+                    Sanitation: ["Room Cleaning"],
+                },
+                null,
+                2,
+            );
+        }
+
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+        const prompt = `
+        You are an intelligent triage system for a university hostel maintenance app.
+        Analyze the following student complaint description. If an image is provided, also analyze the image to better understand the issue.
+        Categorize the issue and return a strict JSON object with the following fields:
+        - "department": Must be one of the keys from the valid categories below.
+        - "sub_category": Must be one of the strings from the array corresponding to the chosen department. Choose the most appropriate one based on the description and image.
+        - "description": A properly formatted and grammatical version of the student's description, kept strictly under 40 words. Include key details visible in the image.
+        - "priority_score": Predict the urgency as exactly "Low", "Medium", or "High". Emergency issues like severe water leakage or sparking wires should be High.
+
+        VALID CATEGORIES (DO NOT INVENT NEW ONES):
+        ${categoryString}
+
+        Ensure the response is ONLY a valid JSON object without any markdown wrapping, code blocks, or additional text.
+
+        Student Complaint:
+        "${description}"
+        `;
+
+        const requestContents = [{ text: prompt }];
+
+        if (req.file) {
+            requestContents.push({
+                inlineData: {
+                    data: req.file.buffer.toString("base64"),
+                    mimeType: req.file.mimetype,
+                },
+            });
+        }
+
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: requestContents,
+        });
+
+        const rawText = response.text;
+        // Clean up possible markdown formatting from Gemini
+        const jsonStr = rawText
+            .replace(/```json/g, "")
+            .replace(/```/g, "")
+            .trim();
+
+        let aiResult;
+        try {
+            aiResult = JSON.parse(jsonStr);
+        } catch (e) {
+            console.error("AI response was not valid JSON:", rawText);
+            return res
+                .status(500)
+                .json({ error: "AI failed to generate a valid response." });
+        }
+
+        res.json(aiResult);
+    } catch (err) {
+        console.error("Error in generateAIComplaintDetails:", err);
+        res.status(500).json({ error: "Failed to process AI triage." });
     }
 };
 
@@ -160,11 +296,13 @@ export const getStudentDashboardStats = async (req, res) => {
         res.json({
             stats: stats.rows[0] || { initiated: 0, resolved: 0, escalated: 0 },
             history: history.rows,
-            pagination: { totalRecords, totalPages, currentPage: page, limit }
+            pagination: { totalRecords, totalPages, currentPage: page, limit },
         });
     } catch (err) {
         console.error("Error fetching student stats:", err);
-        res.status(500).json({ error: "Failed to fetch dashboard statistics." });
+        res.status(500).json({
+            error: "Failed to fetch dashboard statistics.",
+        });
     }
 };
 
@@ -197,7 +335,9 @@ export const escalateComplaint = async (req, res) => {
         res.json(updated.rows[0]);
     } catch (err) {
         console.error("Error escalating complaint:", err);
-        res.status(500).json({ error: "An unexpected error occurred during escalation." });
+        res.status(500).json({
+            error: "An unexpected error occurred during escalation.",
+        });
     }
 };
 
@@ -208,7 +348,9 @@ export const provideFeedback = async (req, res) => {
         const student_id = req.user?.id;
 
         if (!rating || rating < 1 || rating > 5) {
-            return res.status(400).json({ error: "Rating must be an integer between 1 and 5." });
+            return res
+                .status(400)
+                .json({ error: "Rating must be an integer between 1 and 5." });
         }
 
         const updated = await pool.query(
@@ -228,7 +370,9 @@ export const provideFeedback = async (req, res) => {
         res.json(updated.rows[0]);
     } catch (err) {
         console.error("Error submitting feedback:", err);
-        res.status(500).json({ error: "An unexpected error occurred while submitting feedback." });
+        res.status(500).json({
+            error: "An unexpected error occurred while submitting feedback.",
+        });
     }
 };
 
@@ -284,11 +428,13 @@ export const getWorkerDashboardStats = async (req, res) => {
         res.json({
             stats: stats.rows[0] || { pending: 0, resolved: 0, defaulted: 0 },
             history: assigned.rows,
-            pagination: { totalRecords, totalPages, currentPage: page, limit }
+            pagination: { totalRecords, totalPages, currentPage: page, limit },
         });
     } catch (err) {
         console.error("Error fetching worker stats:", err);
-        res.status(500).json({ error: "Failed to fetch dashboard statistics." });
+        res.status(500).json({
+            error: "Failed to fetch dashboard statistics.",
+        });
     }
 };
 
@@ -301,7 +447,10 @@ export const resolveComplaint = async (req, res) => {
         // 1. Handle Cloudinary Upload via Memory Stream for resolution proof
         let resolved_image = null;
         if (req.file) {
-            const uploadResult = await uploadToCloudinary(req.file.buffer, "resolved_complaints");
+            const uploadResult = await uploadToCloudinary(
+                req.file.buffer,
+                "resolved_complaints",
+            );
             resolved_image = uploadResult.secure_url;
         }
 
@@ -329,6 +478,8 @@ export const resolveComplaint = async (req, res) => {
         res.json(updated.rows[0]);
     } catch (err) {
         console.error("Error resolving complaint:", err);
-        res.status(500).json({ error: "An unexpected error occurred while resolving the complaint." });
+        res.status(500).json({
+            error: "An unexpected error occurred while resolving the complaint.",
+        });
     }
 };

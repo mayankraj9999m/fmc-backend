@@ -4,7 +4,10 @@ export const getWorkerPerformance = async (req, res) => {
     try {
         // Assuming the warden's hostel is stored in the token payload
         const hostel_name = req.user?.hostel_name;
-        if (!hostel_name) return res.status(403).json({ error: "Warden hostel context missing." });
+        if (!hostel_name)
+            return res
+                .status(403)
+                .json({ error: "Warden hostel context missing." });
 
         const department = req.query.department || "";
 
@@ -62,9 +65,17 @@ export const getWorkerComplaintsForWarden = async (req, res) => {
         const offset = (page - 1) * limit;
 
         // Security check: Ensure the worker belongs to the warden's hostel
-        const workerCheck = await pool.query("SELECT hostel_name FROM workers WHERE id = $1", [id]);
-        if (workerCheck.rowCount === 0 || workerCheck.rows[0].hostel_name !== warden_hostel) {
-            return res.status(403).json({ error: "Unauthorized access to this worker's data." });
+        const workerCheck = await pool.query(
+            "SELECT hostel_name FROM workers WHERE id = $1",
+            [id],
+        );
+        if (
+            workerCheck.rowCount === 0 ||
+            workerCheck.rows[0].hostel_name !== warden_hostel
+        ) {
+            return res
+                .status(403)
+                .json({ error: "Unauthorized access to this worker's data." });
         }
 
         // Get total count for pagination
@@ -82,7 +93,11 @@ export const getWorkerComplaintsForWarden = async (req, res) => {
             ORDER BY c.assigned_at DESC NULLS LAST
             LIMIT $2 OFFSET $3
         `;
-        const complaintsRes = await pool.query(complaintsQuery, [id, limit, offset]);
+        const complaintsRes = await pool.query(complaintsQuery, [
+            id,
+            limit,
+            offset,
+        ]);
 
         res.json({
             history: complaintsRes.rows,

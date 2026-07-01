@@ -1,14 +1,15 @@
 import express from "express";
 import { upload } from "../config/cloudinary.js";
 // Import both verifyToken AND verifyRole
-import { verifyToken, verifyRole } from "../middleware/authMiddleware.js"; 
+import { verifyToken, verifyRole } from "../middleware/authMiddleware.js";
 import {
     lodgeComplaint,
     getStudentDashboardStats,
     escalateComplaint,
     getWorkerDashboardStats,
     resolveComplaint,
-    provideFeedback
+    provideFeedback,
+    generateAIComplaintDetails,
 } from "../controllers/complaintController.js";
 
 const router = express.Router();
@@ -24,13 +25,17 @@ const studentRouter = express.Router();
 studentRouter.use(verifyRole("student")); // Check role
 
 studentRouter.post("/", upload.single("complaint_image"), lodgeComplaint);
+studentRouter.post(
+    "/ai-assist",
+    upload.single("complaint_image"),
+    generateAIComplaintDetails,
+);
 studentRouter.get("/dashboard", getStudentDashboardStats);
 studentRouter.put("/:id/escalate", escalateComplaint);
 studentRouter.put("/:id/feedback", provideFeedback);
 
 // Attach the studentRouter to the main router
 router.use("/student", studentRouter);
-
 
 // ==========================================
 // WORKER ROUTES (Only accessible by workers)
@@ -39,10 +44,13 @@ const workerRouter = express.Router();
 workerRouter.use(verifyRole("worker")); // Check role
 
 workerRouter.get("/dashboard", getWorkerDashboardStats);
-workerRouter.put("/:id/resolve", upload.single("resolved_image"), resolveComplaint);
+workerRouter.put(
+    "/:id/resolve",
+    upload.single("resolved_image"),
+    resolveComplaint,
+);
 
 // Attach the workerRouter to the main router
 router.use("/worker", workerRouter);
-
 
 export default router;

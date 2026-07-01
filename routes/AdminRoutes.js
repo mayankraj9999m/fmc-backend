@@ -17,9 +17,14 @@ const isAdmin = async (req, res, next) => {
     }
     try {
         // Fetch position and hostel_name to attach them to the request for reliable RBAC
-        const adminResult = await pool.query("SELECT position, hostel_name FROM admins WHERE id = $1", [req.user.id]);
+        const adminResult = await pool.query(
+            "SELECT position, hostel_name FROM admins WHERE id = $1",
+            [req.user.id],
+        );
         if (adminResult.rows.length === 0) {
-            return res.status(403).json({ error: "Access denied. Admin only." });
+            return res
+                .status(403)
+                .json({ error: "Access denied. Admin only." });
         }
         req.user.position = adminResult.rows[0].position;
         req.user.hostel_name = adminResult.rows[0].hostel_name;
@@ -31,7 +36,10 @@ const isAdmin = async (req, res, next) => {
 
 // Helper function to check if the admin is restricted to a specific hostel
 const isRestrictedAdmin = (user) => {
-    return user.position === "Hostel Warden" || user.position === "Associate Warden";
+    return (
+        user.position === "Hostel Warden" ||
+        user.position === "Associate Warden"
+    );
 };
 
 // Apply authentication middleware to all routes below
@@ -48,8 +56,17 @@ router.get("/", async (req, res) => {
         const search = req.query.search || "";
         const offset = (page - 1) * limit;
 
-        const allowedSortColumns = ["roll_no", "name", "email", "hostel_name", "room_no", "floor_no"];
-        const validSortBy = allowedSortColumns.includes(sortBy) ? sortBy : "room_no";
+        const allowedSortColumns = [
+            "roll_no",
+            "name",
+            "email",
+            "hostel_name",
+            "room_no",
+            "floor_no",
+        ];
+        const validSortBy = allowedSortColumns.includes(sortBy)
+            ? sortBy
+            : "room_no";
 
         let countQuery = "SELECT COUNT(*) FROM students WHERE 1=1";
         let dataQuery = "SELECT * FROM students WHERE 1=1";
@@ -78,7 +95,9 @@ router.get("/", async (req, res) => {
         const countResult = await pool.query(
             countQuery,
             isRestrictedAdmin(req.user)
-                ? [req.user.hostel_name, search ? `%${search}%` : null].filter(Boolean)
+                ? [req.user.hostel_name, search ? `%${search}%` : null].filter(
+                      Boolean,
+                  )
                 : search
                   ? [`%${search}%`]
                   : [],
@@ -91,7 +110,13 @@ router.get("/", async (req, res) => {
 
         res.status(200).json({
             students: result.rows,
-            pagination: { totalStudents, fetchedStudents: result.rows.length, totalPages, currentPage: page, limit },
+            pagination: {
+                totalStudents,
+                fetchedStudents: result.rows.length,
+                totalPages,
+                currentPage: page,
+                limit,
+            },
         });
     } catch (error) {
         console.error("Error fetching students:", error);
@@ -103,12 +128,18 @@ router.get("/", async (req, res) => {
 router.post("/upload-csv", upload.single("file"), (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded." });
 
-    const isCsvMimeType = req.file.mimetype === "text/csv" || req.file.mimetype === "application/vnd.ms-excel";
+    const isCsvMimeType =
+        req.file.mimetype === "text/csv" ||
+        req.file.mimetype === "application/vnd.ms-excel";
     const isCsvExtension = req.file.originalname.toLowerCase().endsWith(".csv");
 
     if (!isCsvMimeType && !isCsvExtension) {
-        fs.unlinkSync(req.file.path); 
-        return res.status(400).json({ error: "Invalid file format. Please upload a valid .csv file." });
+        fs.unlinkSync(req.file.path);
+        return res
+            .status(400)
+            .json({
+                error: "Invalid file format. Please upload a valid .csv file.",
+            });
     }
 
     const results = [];
@@ -130,11 +161,16 @@ router.post("/upload-csv", upload.single("file"), (req, res) => {
         )
         .on("error", (error) => {
             console.error("CSV Parse Error:", error);
-            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path); 
-            res.status(500).json({ error: "Failed to read or parse the CSV file. It might be corrupted." });
+            if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+            res.status(500).json({
+                error: "Failed to read or parse the CSV file. It might be corrupted.",
+            });
         })
         .on("data", (data) => {
-            if (Object.keys(data).length > 0 && Object.values(data).some((val) => val !== "")) {
+            if (
+                Object.keys(data).length > 0 &&
+                Object.values(data).some((val) => val !== "")
+            ) {
                 results.push(data);
             }
         })
@@ -143,7 +179,11 @@ router.post("/upload-csv", upload.single("file"), (req, res) => {
                 if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
                 if (results.length === 0) {
-                    return res.status(400).json({ error: "The uploaded CSV file is empty or contains no valid data." });
+                    return res
+                        .status(400)
+                        .json({
+                            error: "The uploaded CSV file is empty or contains no valid data.",
+                        });
                 }
 
                 const firstRow = results[0];
@@ -163,18 +203,33 @@ router.post("/upload-csv", upload.single("file"), (req, res) => {
                     const room_no = student["room_no"] || null;
                     const floor_no = student["floor_no"] || null;
                     let hostel_name = student["hostel_name"] || null;
-                    const email = student["email"] || `${roll_no?.toLowerCase()}@nitdelhi.ac.in`;
+                    const email =
+                        student["email"] ||
+                        `${roll_no?.toLowerCase()}@nitdelhi.ac.in`;
 
                     if (!roll_no || !name) {
-                        errors.push({ type: "row", message: "Missing Roll No or Name for row", data: student });
-                        errors.push({ type: "message", message: "Missing Roll No or Name for row" });
+                        errors.push({
+                            type: "row",
+                            message: "Missing Roll No or Name for row",
+                            data: student,
+                        });
+                        errors.push({
+                            type: "message",
+                            message: "Missing Roll No or Name for row",
+                        });
                         continue;
                     }
 
                     // RBAC check for Wardens
                     if (isRestricted) {
-                        if (hostel_name && hostel_name !== req.user.hostel_name) {
-                            errors.push({ type: "message", message: `Permission Denied for ${roll_no}: Cannot assign to ${hostel_name}.` });
+                        if (
+                            hostel_name &&
+                            hostel_name !== req.user.hostel_name
+                        ) {
+                            errors.push({
+                                type: "message",
+                                message: `Permission Denied for ${roll_no}: Cannot assign to ${hostel_name}.`,
+                            });
                             continue;
                         }
                         hostel_name = req.user.hostel_name; // Force assigned hostel
@@ -196,10 +251,17 @@ router.post("/upload-csv", upload.single("file"), (req, res) => {
 
                         if (checkQuery.rows.length === 1) {
                             const existingStudent = checkQuery.rows[0];
-                            
+
                             // RBAC: Verify if the restricted admin owns the existing student
-                            if (isRestricted && existingStudent.hostel_name !== req.user.hostel_name) {
-                                errors.push({ type: "message", message: `Permission Denied for ${roll_no}: Student currently belongs to another hostel.` });
+                            if (
+                                isRestricted &&
+                                existingStudent.hostel_name !==
+                                    req.user.hostel_name
+                            ) {
+                                errors.push({
+                                    type: "message",
+                                    message: `Permission Denied for ${roll_no}: Student currently belongs to another hostel.`,
+                                });
                                 continue;
                             }
 
@@ -208,20 +270,37 @@ router.post("/upload-csv", upload.single("file"), (req, res) => {
                                 `UPDATE students 
                                  SET name = $1, roll_no = $2, email = $3, room_no = $4, floor_no = $5, hostel_name = $6
                                  WHERE id = $7`,
-                                [name, roll_no, email, room_no, parseInt(floor_no), hostel_name, studentId],
+                                [
+                                    name,
+                                    roll_no,
+                                    email,
+                                    room_no,
+                                    parseInt(floor_no),
+                                    hostel_name,
+                                    studentId,
+                                ],
                             );
                             successfulCount++;
-                        }
-                        else {
+                        } else {
                             await pool.query(
                                 `INSERT INTO students (roll_no, name, email, room_no, floor_no, hostel_name)
                                  VALUES ($1, $2, $3, $4, $5, $6)`,
-                                [roll_no, name, email, room_no, parseInt(floor_no), hostel_name],
+                                [
+                                    roll_no,
+                                    name,
+                                    email,
+                                    room_no,
+                                    parseInt(floor_no),
+                                    hostel_name,
+                                ],
                             );
                             successfulCount++;
                         }
                     } catch (dbError) {
-                        errors.push({ type: "message", message: `DB Error for ${roll_no}: ${dbError.message}` });
+                        errors.push({
+                            type: "message",
+                            message: `DB Error for ${roll_no}: ${dbError.message}`,
+                        });
                     }
                 }
 
@@ -231,7 +310,9 @@ router.post("/upload-csv", upload.single("file"), (req, res) => {
                 });
             } catch (error) {
                 console.error("CSV Processing Error:", error);
-                res.status(500).json({ error: "An unexpected error occurred during database processing." });
+                res.status(500).json({
+                    error: "An unexpected error occurred during database processing.",
+                });
             }
         });
 });
@@ -242,11 +323,24 @@ router.put("/:id", async (req, res) => {
     const isRestricted = isRestrictedAdmin(req.user);
 
     // RBAC: Prevent Warden from moving a student to another hostel
-    if (isRestricted && req.body.hostel_name && req.body.hostel_name !== req.user.hostel_name) {
-        return res.status(403).json({ error: "You cannot move a student to another hostel." });
+    if (
+        isRestricted &&
+        req.body.hostel_name &&
+        req.body.hostel_name !== req.user.hostel_name
+    ) {
+        return res
+            .status(403)
+            .json({ error: "You cannot move a student to another hostel." });
     }
 
-    const allowedFields = ["name", "roll_no", "email", "hostel_name", "room_no", "floor_no"];
+    const allowedFields = [
+        "name",
+        "roll_no",
+        "email",
+        "hostel_name",
+        "room_no",
+        "floor_no",
+    ];
     const setClauses = [];
     const values = [];
     let paramIndex = 1;
@@ -254,13 +348,17 @@ router.put("/:id", async (req, res) => {
     for (const field of allowedFields) {
         if (req.body[field] !== undefined) {
             setClauses.push(`${field} = $${paramIndex}`);
-            if (field === "floor_no") values.push(req.body[field] ? parseInt(req.body[field]) : null);
+            if (field === "floor_no")
+                values.push(req.body[field] ? parseInt(req.body[field]) : null);
             else values.push(req.body[field]);
             paramIndex++;
         }
     }
 
-    if (setClauses.length === 0) return res.status(400).json({ error: "No valid fields provided to update." });
+    if (setClauses.length === 0)
+        return res
+            .status(400)
+            .json({ error: "No valid fields provided to update." });
 
     values.push(id);
     let query = `UPDATE students SET ${setClauses.join(", ")} WHERE id = $${paramIndex}`;
@@ -273,12 +371,16 @@ router.put("/:id", async (req, res) => {
     }
 
     // Return the id to confirm a row was updated
-    query += ` RETURNING id`; 
+    query += ` RETURNING id`;
 
     try {
         const result = await pool.query(query, values);
         if (result.rowCount === 0) {
-            return res.status(404).json({ error: "Student not found or permission denied to update." });
+            return res
+                .status(404)
+                .json({
+                    error: "Student not found or permission denied to update.",
+                });
         }
         res.status(200).json({ message: "Student updated successfully." });
     } catch (error) {
@@ -300,13 +402,15 @@ router.delete("/:id", async (req, res) => {
         query += " AND hostel_name = $2";
         params.push(req.user.hostel_name);
     }
-    
+
     query += " RETURNING id";
 
     try {
         const result = await pool.query(query, params);
         if (result.rowCount === 0) {
-             return res.status(404).json({ error: "Student not found or permission denied." });
+            return res
+                .status(404)
+                .json({ error: "Student not found or permission denied." });
         }
         res.status(200).json({ message: "Student deleted successfully." });
     } catch (error) {
@@ -320,7 +424,9 @@ router.post("/add", async (req, res) => {
     const { roll_no, name, email, hostel_name, room_no, floor_no } = req.body;
 
     if (!roll_no || !name || !email) {
-        return res.status(400).json({ error: "Roll No, Name, and Email are required." });
+        return res
+            .status(400)
+            .json({ error: "Roll No, Name, and Email are required." });
     }
 
     let finalHostelName = hostel_name;
@@ -329,7 +435,11 @@ router.post("/add", async (req, res) => {
     // RBAC: Enforce Warden's own hostel
     if (isRestricted) {
         if (hostel_name && hostel_name !== req.user.hostel_name) {
-            return res.status(403).json({ error: "You can only add students to your assigned hostel." });
+            return res
+                .status(403)
+                .json({
+                    error: "You can only add students to your assigned hostel.",
+                });
         }
         finalHostelName = req.user.hostel_name;
     }
@@ -338,7 +448,14 @@ router.post("/add", async (req, res) => {
         await pool.query(
             `INSERT INTO students (roll_no, name, email, hostel_name, room_no, floor_no)
              VALUES ($1, $2, $3, $4, $5, $6)`,
-            [roll_no, name, email, finalHostelName || null, room_no || null, floor_no ? parseInt(floor_no) : null],
+            [
+                roll_no,
+                name,
+                email,
+                finalHostelName || null,
+                room_no || null,
+                floor_no ? parseInt(floor_no) : null,
+            ],
         );
 
         res.status(201).json({ message: "Student added successfully." });
@@ -346,7 +463,11 @@ router.post("/add", async (req, res) => {
         console.error("Add Student Error:", error);
 
         if (error.code === "23505") {
-            return res.status(400).json({ error: "A student with this Roll No or Email already exists." });
+            return res
+                .status(400)
+                .json({
+                    error: "A student with this Roll No or Email already exists.",
+                });
         }
 
         res.status(500).json({ error: "Failed to add student." });
@@ -359,14 +480,21 @@ router.post("/bulk-delete", async (req, res) => {
     const isRestricted = isRestrictedAdmin(req.user);
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
-        return res.status(400).json({ error: "No student IDs provided for deletion." });
+        return res
+            .status(400)
+            .json({ error: "No student IDs provided for deletion." });
     }
 
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    const validIds = ids.filter((id) => typeof id === "string" && uuidRegex.test(id));
+    const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const validIds = ids.filter(
+        (id) => typeof id === "string" && uuidRegex.test(id),
+    );
 
     if (validIds.length === 0) {
-        return res.status(400).json({ error: "No valid student IDs provided." });
+        return res
+            .status(400)
+            .json({ error: "No valid student IDs provided." });
     }
 
     try {
@@ -382,7 +510,11 @@ router.post("/bulk-delete", async (req, res) => {
         const result = await pool.query(query, params);
 
         if (result.rowCount === 0) {
-            return res.status(404).json({ error: "No matching students found to delete or permission denied." });
+            return res
+                .status(404)
+                .json({
+                    error: "No matching students found to delete or permission denied.",
+                });
         }
 
         if (result.rowCount < validIds.length) {
@@ -391,7 +523,9 @@ router.post("/bulk-delete", async (req, res) => {
             });
         }
 
-        res.status(200).json({ message: `Successfully deleted ${result.rowCount} students.` });
+        res.status(200).json({
+            message: `Successfully deleted ${result.rowCount} students.`,
+        });
     } catch (error) {
         console.error("Bulk Delete Error:", error);
         res.status(500).json({ error: "Failed to delete selected students." });
@@ -407,10 +541,20 @@ router.get("/export", async (req, res) => {
         const search = req.query.search || "";
 
         // Validate sort columns to prevent SQL injection
-        const allowedSortColumns = ["roll_no", "name", "email", "hostel_name", "room_no", "floor_no"];
-        const validSortBy = allowedSortColumns.includes(sortBy) ? sortBy : "room_no";
+        const allowedSortColumns = [
+            "roll_no",
+            "name",
+            "email",
+            "hostel_name",
+            "room_no",
+            "floor_no",
+        ];
+        const validSortBy = allowedSortColumns.includes(sortBy)
+            ? sortBy
+            : "room_no";
 
-        let exportQuery = "SELECT roll_no, name, email, hostel_name, room_no, floor_no FROM students WHERE 1=1";
+        let exportQuery =
+            "SELECT roll_no, name, email, hostel_name, room_no, floor_no FROM students WHERE 1=1";
         let params = [];
 
         // 1. Apply RBAC for export
@@ -433,11 +577,22 @@ router.get("/export", async (req, res) => {
 
         const students = result.rows;
         if (students.length === 0) {
-            return res.status(404).json({ error: "No students found to export with the current filters." });
+            return res
+                .status(404)
+                .json({
+                    error: "No students found to export with the current filters.",
+                });
         }
 
         // Construct CSV
-        const headers = ["Roll No", "Name", "Email", "Hostel Name", "Room No", "Floor No"];
+        const headers = [
+            "Roll No",
+            "Name",
+            "Email",
+            "Hostel Name",
+            "Room No",
+            "Floor No",
+        ];
         const csvRows = [headers.join(",")];
 
         for (const student of students) {
@@ -450,13 +605,16 @@ router.get("/export", async (req, res) => {
                 student.floor_no || "",
             ];
             // Wrap in quotes to prevent commas inside data from breaking columns, just in case
-            csvRows.push(values.map(val => `"${val}"`).join(",")); 
+            csvRows.push(values.map((val) => `"${val}"`).join(","));
         }
 
         const csvString = csvRows.join("\n");
 
         res.setHeader("Content-Type", "text/csv");
-        res.setHeader("Content-Disposition", "attachment; filename=students_export.csv");
+        res.setHeader(
+            "Content-Disposition",
+            "attachment; filename=students_export.csv",
+        );
         res.status(200).send(csvString);
     } catch (error) {
         console.error("Export Error:", error);

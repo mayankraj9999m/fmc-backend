@@ -1,5 +1,8 @@
 import express from "express";
-import { getAnnouncements, createAnnouncement } from "../controllers/announcementController.js";
+import {
+    getAnnouncements,
+    createAnnouncement,
+} from "../controllers/announcementController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();

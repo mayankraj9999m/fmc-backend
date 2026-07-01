@@ -7,9 +7,17 @@ import { verifyToken } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 // Middleware: Strictly enforce Chief Warden access
-const verifyChiefWarden = (req, res, next) => {    
-    if (!req.user || req.user.role != "admin" || req.user.position != "Chief Warden") {
-        return res.status(403).json({ error: "Access denied. Chief Warden authorization required." });
+const verifyChiefWarden = (req, res, next) => {
+    if (
+        !req.user ||
+        req.user.role != "admin" ||
+        req.user.position != "Chief Warden"
+    ) {
+        return res
+            .status(403)
+            .json({
+                error: "Access denied. Chief Warden authorization required.",
+            });
     }
     next();
 };
@@ -20,7 +28,8 @@ router.use(verifyChiefWarden);
 
 // Helper function to generate a random secure password
 const generateRandomPassword = () => {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
+    const chars =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*";
     let password = "";
     for (let i = 0; i < 8; i++) {
         password += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -55,11 +64,17 @@ router.post("/wardens", async (req, res) => {
         const { name, email, phone_no, position, hostel_name } = req.body;
 
         if (!name || !email || !position) {
-            return res.status(400).json({ error: "Name, email, and position are required." });
+            return res
+                .status(400)
+                .json({ error: "Name, email, and position are required." });
         }
 
         if (!hostel_name && position != "Junior Assistant") {
-            return res.status(400).json({ error: "Wardens and associate wardens should have their hostel assigned" });
+            return res
+                .status(400)
+                .json({
+                    error: "Wardens and associate wardens should have their hostel assigned",
+                });
         }
 
         // Auto-generate password
@@ -70,7 +85,14 @@ router.post("/wardens", async (req, res) => {
             `INSERT INTO admins (name, email, password_hash, phone_no, position, hostel_name, requires_password_change) 
              VALUES ($1, $2, $3, $4, $5, $6, true) 
              RETURNING id, name, email, position, hostel_name`,
-            [name, email, hashedPassword, phone_no || null, position, hostel_name || null],
+            [
+                name,
+                email,
+                hashedPassword,
+                phone_no || null,
+                position,
+                hostel_name || null,
+            ],
         );
 
         // Return the plaintext password so the Chief Warden can share it
@@ -81,7 +103,8 @@ router.post("/wardens", async (req, res) => {
         });
     } catch (error) {
         console.error("Create Warden Error:", error);
-        if (error.code === "23505") return res.status(400).json({ error: "Email already exists." });
+        if (error.code === "23505")
+            return res.status(400).json({ error: "Email already exists." });
         res.status(500).json({ error: "Failed to create account." });
     }
 });
@@ -92,21 +115,35 @@ router.post("/wardens", async (req, res) => {
 router.put("/wardens/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, email, phone_no, position, hostel_name, password } = req.body;
+        const { name, email, phone_no, position, hostel_name, password } =
+            req.body;
         if (!hostel_name && position != "Junior Assistant") {
-            return res.status(400).json({ error: "Wardens and associate wardens should have their hostel assigned" });
+            return res
+                .status(400)
+                .json({
+                    error: "Wardens and associate wardens should have their hostel assigned",
+                });
         }
 
-        let updateQuery = "UPDATE admins SET name = $1, email = $2, phone_no = $3, position = $4, hostel_name = $5";
-        let values = [name, email, phone_no || null, position, hostel_name || null];
+        let updateQuery =
+            "UPDATE admins SET name = $1, email = $2, phone_no = $3, position = $4, hostel_name = $5";
+        let values = [
+            name,
+            email,
+            phone_no || null,
+            position,
+            hostel_name || null,
+        ];
 
         // If Chief Warden provided a new password, update it too
         if (password && password.trim() !== "") {
             const hashedPassword = await bcrypt.hash(password, 10);
-            updateQuery += ", password_hash = $6 WHERE id = $7 RETURNING id, name, email, position, hostel_name";
+            updateQuery +=
+                ", password_hash = $6 WHERE id = $7 RETURNING id, name, email, position, hostel_name";
             values.push(hashedPassword, id);
         } else {
-            updateQuery += " WHERE id = $6 RETURNING id, name, email, position, hostel_name";
+            updateQuery +=
+                " WHERE id = $6 RETURNING id, name, email, position, hostel_name";
             values.push(id);
         }
 
@@ -116,10 +153,14 @@ router.put("/wardens/:id", async (req, res) => {
             return res.status(404).json({ error: "Account not found." });
         }
 
-        res.status(200).json({ message: "Account updated successfully", admin: result.rows[0] });
+        res.status(200).json({
+            message: "Account updated successfully",
+            admin: result.rows[0],
+        });
     } catch (error) {
         console.error("Update Warden Error:", error);
-        if (error.code === "23505") return res.status(400).json({ error: "Email already in use." });
+        if (error.code === "23505")
+            return res.status(400).json({ error: "Email already in use." });
         res.status(500).json({ error: "Failed to update account." });
     }
 });
@@ -130,7 +171,10 @@ router.put("/wardens/:id", async (req, res) => {
 router.delete("/wardens/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query("DELETE FROM admins WHERE id = $1 RETURNING id", [id]);
+        const result = await pool.query(
+            "DELETE FROM admins WHERE id = $1 RETURNING id",
+            [id],
+        );
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: "Account not found." });
@@ -164,7 +208,7 @@ router.get("/hostel-analytics", async (req, res) => {
             GROUP BY s.hostel_name
             ORDER BY s.hostel_name ASC;
         `;
-        
+
         const result = await pool.query(query);
         res.status(200).json(result.rows);
     } catch (error) {
